@@ -4,8 +4,14 @@
   --bg-panel-strong: rgba(197, 224, 255, 0.16);
   --border: rgba(198, 223, 255, 0.32);
   --border-strong: rgba(224, 239, 255, 0.55);
+
   --text: #edf6ff;
   --muted: #b8cbe4;
+
+  --text-on-dark: #edf6ff;   /* [NEW] 다크 배경(헤더/버튼) */
+  --text-on-light: #16324f;  /* [NEW] 밝은 글래스 카드/표 본문 */
+  --muted-on-light: #5f7692; /* [NEW] 밝은 패널 보조 텍스트 */
+
   --accent: #7ec8ff;
   --accent-2: #7aa7ff;
   --danger: #ff7b7b;
@@ -58,6 +64,28 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 
 .muted { color: var(--muted); }
 
+/* ===== [CHANGED] 텍스트 컬러 정책 정리 (카드 전체 강제색 제거, 테이블/제목만 지정) ===== */
+.glass-card__title,
+.ui-table th {
+  color: #233041;           /* [CHANGED] 네이비-차콜 통일 */
+  font-weight: 700;
+}
+
+.ui-table td {
+  color: #233041;           /* [NEW] 표 본문 전체 통일 */
+  font-weight: 600;
+}
+
+/* [CHANGED] 운영제한 규칙 텍스트만 흰색 계열로 분리 */
+.glass-card__subtitle {
+  color: #3977b9;
+  font-weight: 600;
+}
+.capacity-banner p {
+  color: rgba(255,255,255,.90);   /* [CHANGED] */
+  font-weight: 500;
+}
+
 .app-bg {
   position: relative;
   min-height: 100vh;
@@ -66,19 +94,19 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .app-bg__image {
   position: fixed;
   inset: 0;
-  background-image: url("/assets/hospital-bg.png");
+  background-image: url("/assets/hospital-bg-bright.png"); /* [CHANGED] 기존: /assets/hospital-bg.png */
   background-size: cover;
   background-position: center;
-  filter: blur(2px) saturate(1.05);
-  transform: scale(1.04);
+  filter: blur(3px) brightness(1.10) saturate(1.10); /* [CHANGED] 기존: blur(2px) saturate(1.05) */
+  transform: scale(1.03); /* [CHANGED] 기존: scale(1.04) */
 }
 .app-bg__veil {
   position: fixed;
   inset: 0;
   background:
-    radial-gradient(1000px 500px at 15% 10%, rgba(140, 205, 255, .22), transparent 60%),
-    radial-gradient(800px 480px at 85% 20%, rgba(100, 145, 255, .18), transparent 65%),
-    linear-gradient(180deg, rgba(5, 15, 30, .55), rgba(5, 15, 30, .72));
+    radial-gradient(1100px 560px at 15% 10%, rgba(170, 235, 255, .26), transparent 60%), /* [CHANGED] */
+    radial-gradient(920px 520px at 85% 18%, rgba(140, 210, 255, .22), transparent 65%),   /* [CHANGED] */
+    linear-gradient(180deg, rgba(235, 247, 255, .10), rgba(190, 222, 245, .20));            /* [CHANGED] 기존 어두운 그라데이션 제거 */
   pointer-events: none;
 }
 .app-container {
@@ -192,8 +220,9 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 }
 .glass-card__subtitle {
   margin: 3px 0 0;
-  color: var(--muted);
+  color: #3977b9;
   font-size: .9rem;
+  font-weight: 600;
 }
 .nested-card {
   background: linear-gradient(180deg, rgba(188,225,255,.10), rgba(136,184,240,.05));
@@ -246,10 +275,29 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   text-align: center;
   gap: 4px;
 }
-.donut3d__label { color: var(--muted); font-size: .88rem; }
-.donut3d__value { font-size: 2rem; font-weight: 800; line-height: 1; }
-.donut3d__value span { font-size: .9rem; color: var(--muted); font-weight: 500; }
-.donut3d__percent { font-weight: 700; font-size: .95rem; }
+
+/* ===== [CHANGED] 도넛 중앙 텍스트(9, /30, 라벨) 가독성 강화 ===== */
+.donut3d__label {
+  color: rgba(255,255,255,.86);   /* [CHANGED] */
+  font-size: .88rem;
+}
+.donut3d__value {
+  font-size: 2rem;
+  font-weight: 800;
+  line-height: 1;
+  color: #ffffff;                 /* [NEW] 중앙 9 흰색 */
+}
+.donut3d__value span {
+  font-size: .9rem;
+  color: rgba(255,255,255,.82);   /* [CHANGED] /30 흰색 계열 */
+  font-weight: 500;
+}
+.donut3d__percent {
+  font-weight: 700;
+  font-size: .95rem;
+  color: #7dffbf;                 /* [NEW] 퍼센트는 상태감 유지 */
+}
+
 .donut3d__legend {
   display: flex;
   gap: 10px;
@@ -279,9 +327,22 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   gap: 10px;
   border: 1px solid rgba(210, 230, 255, .18);
   background: rgba(10, 24, 45, .34);
+  color: rgba(255,255,255,.96);   /* [NEW] 운영제한 카드 기본 글자 톤 상향 */
 }
-.capacity-banner p { margin: 4px 0 0; color: var(--muted); font-size: .9rem; }
-.capacity-banner__count { font-size: 1.4rem; font-weight: 800; }
+.capacity-banner p { margin: 4px 0 0; color: rgba(255,255,255,.90); font-size: .9rem; } /* [CHANGED] */
+.capacity-banner__count {
+  font-size: 1.4rem;
+  font-weight: 800;
+  color: #ffffff;                 /* [CHANGED] 9/30 흰색 */
+}
+
+/* ===== [NEW] 운영제한 규칙 카드 내 핵심 텍스트 흰색 강화 ===== */
+.capacity-banner strong,
+.capacity-banner b {
+  color: #ffffff;
+  font-weight: 800;
+}
+
 .capacity-banner.safe { box-shadow: inset 0 0 0 1px rgba(86,212,154,.18); }
 .capacity-banner.warn { box-shadow: inset 0 0 0 1px rgba(251,191,36,.18); }
 .capacity-banner.danger, .capacity-banner.full { box-shadow: inset 0 0 0 1px rgba(255,105,97,.26); }
@@ -294,18 +355,36 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   min-width: 680px;
 }
 .ui-table.compact { min-width: 560px; }
+
+/* ===== [CHANGED] 줄 구분 강화 + 가독성 개선 ===== */
 .ui-table th, .ui-table td {
   padding: 10px 10px;
-  border-bottom: 1px solid rgba(203, 227, 255, .10);
+  border-bottom: 1px solid rgba(255, 255, 255, .14); /* [CHANGED] 기존 .10 -> .14 */
   text-align: left;
   vertical-align: middle;
 }
+
 .ui-table th {
-  color: #dbeeff;
+  color: #233041; /* [CHANGED] 네이비-차콜 통일 */
   font-weight: 700;
-  background: rgba(255,255,255,.03);
+  background: rgba(255,255,255,.07); /* [CHANGED] 기존 .06 -> .07 */
 }
-.ui-table tr:hover td { background: rgba(163, 208, 255, .05); }
+
+.ui-table td {
+  color: #233041;                      /* [CHANGED] 본문 전체 통일 */
+  font-weight: 600;                    /* [CHANGED] */
+  background: rgba(255,255,255,.015);  /* [NEW] 미세한 행 바탕 */
+}
+
+.ui-table td:first-child {
+  color: #233041; /* [CHANGED] 첫 컬럼도 동일 톤 */
+  font-weight: 700;
+}
+
+.ui-table tbody tr:hover td {
+  background: rgba(163, 208, 255, .045); /* [CHANGED] hover 미세 조정 */
+}
+
 .empty-cell { text-align: center !important; color: var(--muted); }
 
 .badge {
