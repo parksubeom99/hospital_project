@@ -1,19 +1,35 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { GlassCard } from "@/shared/components/GlassCard";
 import { RoleGate } from "@/shared/components/RoleGate";
 import { useHospital } from "@/shared/store/HospitalStore";
 import { formatCurrency } from "@/shared/lib/format";
 import { STATUS_LABEL } from "@/shared/config/constants";
+import { buildInvoiceItems, totalAmount } from "@/shared/lib/price";
+import { createInvoiceServer, listInvoicesServer, payInvoiceServer, type BackendInvoice } from "@/shared/services/billingApi";
+
+function backendInvoiceStatusLabel(status?: string) {
+  const x = String(status || "").toUpperCase();
+  if (x === "PAID") return "PAID";
+  if (x === "CANCELED" || x === "CANCELLED") return "CANCELED";
+  if (x === "ISSUED") return "UNPAID";
+  return x || "-";
+}
 
 export function BillingScreen() {
-  const { state, patientsById, generateInvoiceFromFinalOrder, payInvoice } = useHospital();
+  const { state, patientsById, generateInvoiceFromFinalOrder, payInvoice, updateVisitStatus } = useHospital();
   const [visitId, setVisitId] = useState<number>(() => {
     const withFinalOrder = Object.keys(state.finalOrders).map(Number);
     return withFinalOrder[0] ?? state.visits[0]?.id ?? 0;
   });
   const [message, setMessage] = useState("");
+  const [serverWriteEnabled, setServerWriteEnabled] = useState(false);
+  const [serverSyncEnabled, setServerSyncEnabled] = useState(false);
+  const [syncLoading, setSyncLoading] = useState(false);
+  const [serverSyncedAt, setServerSyncedAt] = useState<string | null>(null);
+  const [serverInvoices, setServerInvoices] = useState<BackendInvoice[]>([]);
+  const [lastServerPayment, setLastServerPayment] = useState<{ paymentId: number; method: string; paidAt?: string } | null>(null);
 
   const targetVisit = state.visits.find((v) => v.id === visitId);
   const patient = targetVisit ? patientsById[targetVisit.patientId] : undefined;
@@ -24,11 +40,96 @@ export function BillingScreen() {
       .sort((a, b) => b.invoiceId - a.invoiceId)[0];
   }, [state.invoices, visitId]);
 
+  const latestServerInvoice = useMemo(() => {
+    return serverInvoices
+      .filter((i) => i.visitId === visitId)
+      .sort((a, b) => b.invoiceId - a.invoiceId)[0];
+  }, [serverInvoices, visitId]);
+
   const finalOrder = state.finalOrders[visitId];
 
   const emit = (msg: string) => {
     setMessage(msg);
-    window.setTimeout(() => setMessage(""), 2200);
+    window.setTimeout(() => setMessage(""), 2400);
+  };
+
+  const syncBillingFromServer = async () => {
+    if (!state.session?.accessToken) return emit("실서버 IAM 로그인 후 동기화 가능합니다.");
+    if (!visitId) return emit("접수를 먼저 선택해주세요.");
+    try {
+      setSyncLoading(true);
+      const list = await listInvoicesServer({ session: state.session, visitId });
+      setServerInvoices(list);
+      setServerSyncedAt(new Date().toLocaleTimeString("ko-KR"));
+      emit(`실서버 수납 동기화 완료 (청구 ${list.length}건)`);
+    } catch (e: any) {
+      emit(`실서버 수납 동기화 실패: ${e?.message || e}`);
+    } finally {
+      setSyncLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!serverSyncEnabled || !visitId) return;
+    void syncBillingFromServer();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverSyncEnabled, visitId]);
+
+  const handleGenerateInvoice = async () => {
+    try {
+      if (!visitId) return emit("접수를 먼저 선택해주세요.");
+      const localRes = generateInvoiceFromFinalOrder(visitId);
+      if (!localRes.ok) return emit(localRes.message);
+
+      if (!serverWriteEnabled) return emit(localRes.message);
+      if (!state.session?.accessToken) return emit("실서버 저장 모드는 IAM 로그인 후 사용 가능합니다.");
+      if (!finalOrder) return emit("최종오더가 없어 실서버 청구 생성이 불가합니다.");
+
+      const amount = totalAmount(buildInvoiceItems(finalOrder));
+      await createInvoiceServer({ session: state.session, visitId, amount });
+      await syncBillingFromServer();
+      emit(`${localRes.message} (실서버 청구 생성 포함)`);
+    } catch (e: any) {
+      emit(`영수증 서버 생성 실패: ${e?.message || e}`);
+    }
+  };
+
+  const handlePay = async (method: "CARD" | "CASH") => {
+    try {
+      if (!latestInvoice && !latestServerInvoice) return emit("결제할 영수증이 없습니다.");
+
+      if (!serverWriteEnabled) {
+        if (!latestInvoice) return emit("로컬 영수증이 없습니다. 먼저 영수증 자동 생성을 눌러주세요.");
+        emit(payInvoice(latestInvoice.invoiceId, method).message);
+        return;
+      }
+
+      if (!state.session?.accessToken) return emit("실서버 저장 모드는 IAM 로그인 후 사용 가능합니다.");
+      const target = latestServerInvoice;
+      if (!target) return emit("실서버 영수증이 없습니다. 먼저 영수증 자동 생성을 눌러주세요.");
+      if (String(target.status).toUpperCase() === "PAID") return emit("이미 결제 완료된 영수증입니다.");
+
+      const payment = await payInvoiceServer({
+        session: state.session,
+        invoiceId: target.invoiceId,
+        method,
+        amount: target.totalAmount,
+        idempotencyKey: `front-step4-pay-${target.invoiceId}-${method}`,
+      });
+      setLastServerPayment({ paymentId: payment.paymentId, method: payment.method, paidAt: payment.paidAt });
+
+      // 로컬 UI도 즉시 반영(다음 단계 전 화면 안정성 유지)
+      if (latestInvoice && latestInvoice.status !== "PAID") {
+        payInvoice(latestInvoice.invoiceId, method);
+      } else {
+        updateVisitStatus(visitId, "COMPLETED");
+      }
+
+      await syncBillingFromServer();
+      emit("실서버 결제 완료 + 방문상태 완료 반영(서버/로컬)");
+    } catch (e: any) {
+      emit(`결제 서버 처리 실패: ${e?.message || e}`);
+    }
   };
 
   return (
@@ -36,6 +137,19 @@ export function BillingScreen() {
       <div className="page-grid page-grid--readable">
         <GlassCard title="수납" subtitle="최종오더 결과 기반 영수증 자동 산출 / 결제 처리">
           <div className="form-grid tri">
+            <div className="inline-check-group" style={{ gridColumn: "1 / -1" }}>
+              <label className={`pill-check ${serverWriteEnabled ? "is-on" : ""}`}>
+                <input type="checkbox" checked={serverWriteEnabled} onChange={(e) => setServerWriteEnabled(e.target.checked)} />
+                <span>실서버 저장/결제 모드</span>
+              </label>
+              <label className={`pill-check ${serverSyncEnabled ? "is-on" : ""}`}>
+                <input type="checkbox" checked={serverSyncEnabled} onChange={(e) => setServerSyncEnabled(e.target.checked)} />
+                <span>실서버 동기화 모드</span>
+              </label>
+              <button type="button" onClick={() => void syncBillingFromServer()} disabled={syncLoading}>동기화 실행</button>
+              {serverSyncedAt && <small className="muted">최근 동기화: {serverSyncedAt}</small>}
+            </div>
+
             <label>
               <span>접수 선택</span>
               <select value={visitId} onChange={(e) => setVisitId(Number(e.target.value))}>
@@ -52,7 +166,7 @@ export function BillingScreen() {
               <small>결제 후 규칙: 수납 완료 시 진료완료 처리</small>
             </div>
             <div className="button-row">
-              <button type="button" className="primary-btn" onClick={() => emit(generateInvoiceFromFinalOrder(visitId).message)}>
+              <button type="button" className="primary-btn" onClick={() => void handleGenerateInvoice()}>
                 영수증 자동 생성
               </button>
             </div>
@@ -94,10 +208,18 @@ export function BillingScreen() {
             </GlassCard>
 
             <GlassCard title="영수증 미리보기" subtitle="약 1,000 / 주사 5,000 / 내과수술 50,000 / 외과수술 100,000 / 입원 1박 10,000" className="nested-card">
-              {!latestInvoice ? (
+              {!latestInvoice && !latestServerInvoice ? (
                 <div className="empty-state muted">영수증이 아직 생성되지 않았습니다.</div>
               ) : (
                 <>
+                  {latestServerInvoice && (
+                    <div className="info-pill" style={{ marginBottom: 10 }}>
+                      <span>실서버 청구</span>
+                      <strong>#{latestServerInvoice.invoiceId} / {backendInvoiceStatusLabel(latestServerInvoice.status)}</strong>
+                      <small>총액 {formatCurrency(latestServerInvoice.totalAmount)} {latestServerInvoice.items?.length ? `· 항목 ${latestServerInvoice.items.length}건` : "· TOTAL 라인 중심"}</small>
+                    </div>
+                  )}
+
                   <div className="table-wrap">
                     <table className="ui-table compact">
                       <thead>
@@ -110,8 +232,8 @@ export function BillingScreen() {
                         </tr>
                       </thead>
                       <tbody>
-                        {latestInvoice.items.map((item, idx) => (
-                          <tr key={idx}>
+                        {(latestInvoice?.items ?? []).map((item, idx) => (
+                          <tr key={`local-${idx}`}>
                             <td>{item.itemName}</td>
                             <td>{item.qty}</td>
                             <td>{formatCurrency(item.unitPrice)}</td>
@@ -119,20 +241,49 @@ export function BillingScreen() {
                             <td>{item.metaLabel ?? "-"}</td>
                           </tr>
                         ))}
+
+                        {!latestInvoice && latestServerInvoice?.items?.length ? latestServerInvoice.items.map((item, idx) => (
+                          <tr key={`server-${idx}`}>
+                            <td>{item.itemName ?? item.itemCode ?? "TOTAL"}</td>
+                            <td>{item.qty ?? 1}</td>
+                            <td>{formatCurrency(Number(item.unitPrice ?? 0))}</td>
+                            <td>{formatCurrency(Number(item.lineTotal ?? item.unitPrice ?? 0))}</td>
+                            <td>{item.itemCode ?? "-"}</td>
+                          </tr>
+                        )) : null}
+
+                        {!latestInvoice && (!latestServerInvoice?.items || latestServerInvoice.items.length === 0) && latestServerInvoice ? (
+                          <tr>
+                            <td>Total Amount</td>
+                            <td>1</td>
+                            <td>{formatCurrency(latestServerInvoice.totalAmount)}</td>
+                            <td>{formatCurrency(latestServerInvoice.totalAmount)}</td>
+                            <td>TOTAL</td>
+                          </tr>
+                        ) : null}
                       </tbody>
                     </table>
                   </div>
+
                   <div className="receipt-footer">
                     <div>
-                      <strong>상태</strong>: {latestInvoice.status}
+                      <strong>로컬 상태</strong>: {latestInvoice ? latestInvoice.status : "-"}
+                      {latestServerInvoice && <> · <strong>실서버 상태</strong>: {backendInvoiceStatusLabel(latestServerInvoice.status)}</>}
                     </div>
-                    <div className="receipt-total">{formatCurrency(latestInvoice.totalAmount)}</div>
+                    <div className="receipt-total">{formatCurrency(latestInvoice?.totalAmount ?? latestServerInvoice?.totalAmount ?? 0)}</div>
                   </div>
+
+                  {lastServerPayment && (
+                    <div className="muted" style={{ marginBottom: 8 }}>
+                      최근 서버결제: #{lastServerPayment.paymentId} / {lastServerPayment.method} {lastServerPayment.paidAt ? `/ ${lastServerPayment.paidAt}` : ""}
+                    </div>
+                  )}
+
                   <div className="button-row">
-                    <button type="button" onClick={() => emit(payInvoice(latestInvoice.invoiceId, "CARD").message)} disabled={latestInvoice.status === "PAID"}>
+                    <button type="button" onClick={() => void handlePay("CARD")} disabled={(serverWriteEnabled ? String(latestServerInvoice?.status || "").toUpperCase() === "PAID" : latestInvoice?.status === "PAID")}>
                       카드 결제
                     </button>
-                    <button type="button" onClick={() => emit(payInvoice(latestInvoice.invoiceId, "CASH").message)} disabled={latestInvoice.status === "PAID"}>
+                    <button type="button" onClick={() => void handlePay("CASH")} disabled={(serverWriteEnabled ? String(latestServerInvoice?.status || "").toUpperCase() === "PAID" : latestInvoice?.status === "PAID")}>
                       현금 결제
                     </button>
                   </div>
