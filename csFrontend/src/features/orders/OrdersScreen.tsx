@@ -7,6 +7,7 @@ import { computeAdmission, MEDICATION_CATALOG, useHospital } from "@/shared/stor
 import type { FinalOrderInjectionItem, FinalOrderMedicationItem } from "@/shared/types/domain";
 import { calcNights, periodLabel } from "@/shared/lib/date";
 import { formatCurrency } from "@/shared/lib/format";
+import { getFinalOrdersByVisitServer, saveAndFinalizeFinalOrdersServer } from "@/shared/services/clinicalApi";
 
 type FinalOrderType = "MED" | "SURGERY" | "ADMISSION" | "INJECTION" | "NONE";
 
@@ -34,6 +35,10 @@ export function OrdersScreen() {
   const [admitDate, setAdmitDate] = useState<string>("2026-03-11");
   const [dischargeDate, setDischargeDate] = useState<string>("2026-03-14");
   const [message, setMessage] = useState("");
+  const [serverWriteEnabled, setServerWriteEnabled] = useState(false);
+  const [serverSyncEnabled, setServerSyncEnabled] = useState(false);
+  const [syncLoading, setSyncLoading] = useState(false);
+  const [serverFinalSummary, setServerFinalSummary] = useState<string>("미동기화");
 
   useEffect(() => {
     const fo = state.finalOrders[visitId];
@@ -116,11 +121,49 @@ export function OrdersScreen() {
     window.setTimeout(() => setMessage(""), 2200);
   };
 
+
+  const syncFinalOrdersFromServer = async () => {
+    if (!state.session?.accessToken) return emit("실서버 IAM 로그인 후 동기화 가능합니다.");
+    if (!visitId) return emit("접수를 먼저 선택해주세요.");
+    try {
+      setSyncLoading(true);
+      const rows = await getFinalOrdersByVisitServer({ session: state.session, visitId });
+      if (!rows.length) {
+        setServerFinalSummary('실서버 최종오더 없음');
+      } else {
+        setServerFinalSummary(rows.map((r: any) => `${r.type}:${r.status}`).join(', '));
+      }
+      emit(`실서버 최종오더 동기화 완료 (${rows.length}건)`);
+    } catch (e: any) {
+      emit(`실서버 동기화 실패: ${e?.message || e}`);
+    } finally {
+      setSyncLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!serverSyncEnabled || !visitId) return;
+    void syncFinalOrdersFromServer();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverSyncEnabled, visitId]);
+
   return (
     <RoleGate allowed={["DOC", "SYS"]}>
       <div className="page-grid page-grid--readable">
         <GlassCard title="오더 (최종처방)" subtitle="약 / 주사 / 수술 / 입원 / 이상소견없음(NONE)">
           <div className="form-grid tri">
+            <div className="inline-check-group" style={{ gridColumn: "1 / -1" }}>
+              <label className={`pill-check ${serverWriteEnabled ? "is-on" : ""}`}>
+                <input type="checkbox" checked={serverWriteEnabled} onChange={(e) => setServerWriteEnabled(e.target.checked)} />
+                <span>실서버 저장/확정 모드</span>
+              </label>
+              <label className={`pill-check ${serverSyncEnabled ? "is-on" : ""}`}>
+                <input type="checkbox" checked={serverSyncEnabled} onChange={(e) => setServerSyncEnabled(e.target.checked)} />
+                <span>실서버 동기화 모드</span>
+              </label>
+              <button type="button" onClick={() => void syncFinalOrdersFromServer()} disabled={syncLoading}>동기화 실행</button>
+              <small className="muted">서버요약: {serverFinalSummary}</small>
+            </div>
             <label>
               <span>접수 선택</span>
               <select value={visitId} onChange={(e) => setVisitId(Number(e.target.value))}>
@@ -214,7 +257,6 @@ export function OrdersScreen() {
                     <select value={roomNo} onChange={(e) => setRoomNo(Number(e.target.value))} disabled={!types.includes("SURGERY") || types.includes("NONE")}>
                       {Array.from({ length: 5 }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{n}번 수술실</option>)}
                     </select>
-                  </label>
                 </div>
               </GlassCard>
 
@@ -261,19 +303,33 @@ export function OrdersScreen() {
                 <button
                   className="primary-btn"
                   type="button"
-                  onClick={() => {
+                  onClick={async () => {
                     const admission = types.includes("ADMISSION")
                       ? computeAdmission({ wardNo, admitDate, dischargeDate })
                       : undefined;
-                    const result = saveFinalOrder({
-                      visitId,
-                      types,
-                      medications: types.includes("MED") ? medRows.filter((m) => m.qty > 0) : [],
-                      injections: types.includes("INJECTION") ? injectionRows : [],
-                      surgery: types.includes("SURGERY") ? { surgeryType, roomNo } : undefined,
-                      admission,
-                    });
-                    emit(result.message);
+                    try {
+                      if (serverWriteEnabled) {
+                        const noteParts = [
+                          types.includes("MED") ? `MED:${medRows.length}` : null,
+                          types.includes("INJECTION") ? `INJECTION:${injectionRows.length}` : null,
+                          types.includes("SURGERY") ? `SURGERY:${surgeryType}-R${roomNo}` : null,
+                          types.includes("ADMISSION") && admission ? `ADMISSION:W${wardNo},${admission.nights}N` : null,
+                          types.includes("NONE") ? 'NONE' : null,
+                        ].filter(Boolean).join(' | ');
+                        await saveAndFinalizeFinalOrdersServer({ session: state.session, visitId, types, note: noteParts });
+                      }
+                      const result = saveFinalOrder({
+                        visitId,
+                        types,
+                        medications: types.includes("MED") ? medRows.filter((m) => m.qty > 0) : [],
+                        injections: types.includes("INJECTION") ? injectionRows : [],
+                        surgery: types.includes("SURGERY") ? { surgeryType, roomNo } : undefined,
+                        admission,
+                      });
+                      emit(result.message + (serverWriteEnabled ? " (서버 저장/확정 포함)" : ""));
+                    } catch (e: any) {
+                      emit(`최종오더 서버 저장 실패: ${e?.message || e}`);
+                    }
                   }}
                 >
                   최종오더 저장

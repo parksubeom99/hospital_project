@@ -9,9 +9,7 @@ import { formatDateTime } from "@/shared/lib/date";
 import { formatRrnMasked, maskName, maskPhone } from "@/shared/lib/masking";
 import { STATUS_LABEL } from "@/shared/config/constants";
 import type { VisitStatus } from "@/shared/types/domain";
-import { getManualVisitNextActions } from "@/shared/lib/integrationBridge";
-import { fetchReservationsServer, fetchVisitsServer, type SyncedReservationRow, type SyncedVisitRow } from "@/shared/services/receptionApi";
-import { cancelVisitServer, checkInReservationServer, createReservationServer, createVisitServer, updateVisitServer, updateVisitStatusServer, upsertPatientForReception } from "@/shared/services/receptionMutationApi";
+import { cancelVisitServer, checkInReservationServer, createReservationServer, createVisitServer, updateVisitServer, upsertPatientForReception } from "@/shared/services/receptionMutationApi";
 
 type ReceptionTab = "RESERVATION" | "WAITING" | "EMERGENCY";
 
@@ -36,16 +34,10 @@ export function ReceptionScreen() {
     registerVisitEntry,
     updateVisitEntry,
     removeVisitEntry,
-    updateVisitStatus,
     setEmergencyCount,
   } = useHospital() as any;
 
   const [serverWriteEnabled, setServerWriteEnabled] = useState(false);
-  const [serverSyncEnabled, setServerSyncEnabled] = useState(false);
-  const [syncLoading, setSyncLoading] = useState(false);
-  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
-  const [serverReservations, setServerReservations] = useState<SyncedReservationRow[]>([]);
-  const [serverVisits, setServerVisits] = useState<SyncedVisitRow[]>([]);
 
   const [tab, setTab] = useState<ReceptionTab>("RESERVATION");
   const [toast, setToast] = useState("");
@@ -59,19 +51,6 @@ export function ReceptionScreen() {
   );
 
   const receptionRows = useMemo(() => state.visits.slice().sort((a: any, b: any) => b.id - a.id), [state.visits]);
-
-  const displayReservations = useMemo(() => {
-    if (!serverSyncEnabled) return activeReservations.map((r: any) => ({ kind: "local" as const, row: r }));
-    return serverReservations
-      .filter((r) => r.status === "RESERVED")
-      .sort((a, b) => a.reservedAt.localeCompare(b.reservedAt))
-      .map((r) => ({ kind: "server" as const, row: r }));
-  }, [serverSyncEnabled, activeReservations, serverReservations]);
-
-  const displayVisits = useMemo(() => {
-    if (!serverSyncEnabled) return receptionRows.map((v: any) => ({ kind: "local" as const, row: v }));
-    return serverVisits.slice().sort((a, b) => b.id - a.id).map((v) => ({ kind: "server" as const, row: v }));
-  }, [serverSyncEnabled, receptionRows, serverVisits]);
 
   const [visitForm, setVisitForm] = useState<VisitForm>({
     mode: "WALK_IN",
@@ -103,38 +82,9 @@ export function ReceptionScreen() {
     window.setTimeout(() => setToast(""), 2200);
   };
 
-
-  const syncServerLists = async () => {
-    if (!state.session?.accessToken) {
-      showToast("실서버 동기화 전 로그인(실서버 IAM)이 필요합니다.");
-      return;
-    }
-    try {
-      setSyncLoading(true);
-      const [rs, vs] = await Promise.all([
-        fetchReservationsServer({ session: state.session }),
-        fetchVisitsServer({ session: state.session }),
-      ]);
-      setServerReservations(rs);
-      setServerVisits(vs);
-      setLastSyncedAt(new Date().toLocaleTimeString("ko-KR"));
-      showToast(`서버 동기화 완료 (예약 ${rs.length} / 접수 ${vs.length})`);
-    } catch (e: any) {
-      showToast(`서버 동기화 실패: ${e?.message || e}`);
-    } finally {
-      setSyncLoading(false);
-    }
-  };
-
   useEffect(() => {
     setEmergencyValue(state.emergencyCount);
   }, [state.emergencyCount]);
-
-  useEffect(() => {
-    if (!serverSyncEnabled) return;
-    void syncServerLists();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serverSyncEnabled]);
 
   const resetReservationForm = () => {
     setEditingReservationId(null);
@@ -172,7 +122,7 @@ export function ReceptionScreen() {
         ? updateReservationEntry(editingReservationId, { ...reservationForm, reservedAt: iso })
         : createReservationEntry({ ...reservationForm, reservedAt: iso });
       showToast(result.message + (serverWriteEnabled && !editingReservationId ? " (서버 저장 포함)" : ""));
-      if (result.ok) { resetReservationForm(); if (serverWriteEnabled && serverSyncEnabled) await syncServerLists(); }
+      if (result.ok) resetReservationForm();
     } catch (e: any) {
       showToast(`예약 서버 저장 실패: ${e?.message || e}`);
     }
@@ -180,15 +130,12 @@ export function ReceptionScreen() {
 
   const handleRegisterReservationVisit = async (reservationId: number) => {
     const r = state.reservations.find((it: any) => it.id === reservationId);
-    const p = r ? patientsById[r.patientId] : null;
+    if (!r) return;
+    const p = patientsById[r.patientId];
+    if (!p) return;
     try {
-      if (serverWriteEnabled || (serverSyncEnabled && !r)) {
+      if (serverWriteEnabled) {
         await checkInReservationServer({ session: state.session, reservationId });
-      }
-      if (!r || !p) {
-        showToast("서버 예약내원 체크인 완료" + ((serverSyncEnabled || serverWriteEnabled) ? " (동기화 권장)" : ""));
-        if (serverSyncEnabled) await syncServerLists();
-        return;
       }
       const result = registerVisitEntry({
         mode: "RESERVATION",
@@ -200,7 +147,6 @@ export function ReceptionScreen() {
         phone: p.phone,
       });
       showToast(result.message + (serverWriteEnabled ? " (서버 체크인 포함)" : ""));
-      if (serverWriteEnabled && serverSyncEnabled) await syncServerLists();
     } catch (e: any) {
       showToast(`예약내원 서버 체크인 실패: ${e?.message || e}`);
     }
@@ -249,7 +195,7 @@ export function ReceptionScreen() {
             phone: visitForm.phone,
           });
       showToast(result.message + (serverWriteEnabled ? " (서버 저장 포함)" : ""));
-      if (result.ok) { resetVisitForm(); if (serverWriteEnabled && serverSyncEnabled) await syncServerLists(); }
+      if (result.ok) resetVisitForm();
     } catch (e: any) {
       showToast(`접수 서버 저장 실패: ${e?.message || e}`);
     }
@@ -296,21 +242,6 @@ export function ReceptionScreen() {
             ))}
           </div>
 
-          <div className="inline-btns" style={{ marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
-            <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <input type="checkbox" checked={serverWriteEnabled} onChange={(e) => setServerWriteEnabled(e.target.checked)} />
-              실서버 저장 모드
-            </label>
-            <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <input type="checkbox" checked={serverSyncEnabled} onChange={(e) => setServerSyncEnabled(e.target.checked)} />
-              실서버 목록 동기화 모드
-            </label>
-            <button type="button" onClick={() => void syncServerLists()} disabled={syncLoading}>
-              {syncLoading ? "동기화중..." : "목록 동기화"}
-            </button>
-            {lastSyncedAt && <span style={{ opacity: 0.8 }}>최근 동기화: {lastSyncedAt}</span>}
-          </div>
-
           {tab === "RESERVATION" && (
             <div className="split-grid">
               <GlassCard title={editingReservationId ? "예약 수정" : "예약 등록"} subtitle="신규 환자 예약 (이름 / 전화번호 / 예약시간대)" className="nested-card">
@@ -330,12 +261,10 @@ export function ReceptionScreen() {
                   <table className="ui-table compact">
                     <thead><tr><th>예약번호</th><th>예약시각</th><th>예약자</th><th>전화번호</th><th>상태</th><th>관리</th></tr></thead>
                     <tbody>
-                      {displayReservations.map((item: any) => {
-                        const r: any = item.row;
-                        const isServer = item.kind === "server";
-                        const p = !isServer ? patientsById[r.patientId] : undefined;
-                        const nm = isServer ? (r.contactName ?? "-") : (p?.name ?? r.contactName ?? "-");
-                        const ph = isServer ? (r.contactPhone ?? "-") : (p?.phone ?? r.contactPhone ?? "-");
+                      {activeReservations.map((r: any) => {
+                        const p = patientsById[r.patientId];
+                        const nm = p?.name ?? r.contactName ?? "-";
+                        const ph = p?.phone ?? r.contactPhone ?? "-";
                         return (
                           <tr key={r.id}>
                             <td>{r.id}</td>
@@ -345,7 +274,7 @@ export function ReceptionScreen() {
                             <td>예약</td>
                             <td>
                               <div className="inline-btns">
-                                <button type="button" onClick={() => isServer ? showToast("실서버 동기화행은 수정 대신 서버 원본 기준으로 처리됩니다. (로컬 편집 비활성)") : selectReservationForEdit(r)}>수정</button>
+                                <button type="button" onClick={() => selectReservationForEdit(r)}>수정</button>
                                 <button type="button" onClick={() => handleRegisterReservationVisit(r.id)}>예약내원 접수</button>
                               </div>
                             </td>
@@ -434,39 +363,19 @@ export function ReceptionScreen() {
                   <table className="ui-table">
                     <thead><tr><th>접수번호</th><th>환자명</th><th>성별</th><th>주민번호</th><th>상태</th><th>등록시각</th><th>접수유형</th><th>관리</th></tr></thead>
                     <tbody>
-                      {displayVisits.map((item: any) => {
-                        const visit: any = item.row;
-                        const isServer = item.kind === "server";
-                        const p = !isServer ? patientsById[visit.patientId] : null;
-                        if (!isServer && !p) return null;
+                      {receptionRows.map((visit: any) => {
+                        const p = patientsById[visit.patientId];
+                        if (!p) return null;
                         return (
                           <tr key={visit.id}>
                             <td>{visit.id}</td>
-                            <td>{isServer ? maskName(visit.patientName ?? "-") : maskName(p.name)}</td>
-                            <td>{isServer ? ((visit.gender === "M" ? "남(M)" : visit.gender === "F" ? "여(F)" : "-")) : (p.gender === "M" ? "남(M)" : "여(F)")}</td>
-                            <td>{isServer ? (visit.rrnMasked || "******-*******") : formatRrnMasked(p.rrnFront, p.rrnBack)}</td>
+                            <td>{maskName(p.name)}</td>
+                            <td>{p.gender === "M" ? "남(M)" : "여(F)"}</td>
+                            <td>{formatRrnMasked(p.rrnFront, p.rrnBack)}</td>
                             <td>{STATUS_LABEL[visit.status]}</td>
                             <td>{formatDateTime(visit.registeredAt)}</td>
                             <td>{visit.visitType === "RESERVATION" ? "예약내원" : "현장"}</td>
-                            <td><div className="inline-btns">
-                              <button type="button" onClick={() => isServer ? showToast("실서버 동기화행은 로컬 수정 비활성 (상태변경/취소 사용)") : selectVisitForEdit(visit)}>수정</button>
-                              {getManualVisitNextActions(visit.status).length > 0 && (
-                                <button type="button" onClick={async () => {
-                                  const next = getManualVisitNextActions(visit.status)[0];
-                                  try {
-                                    if (serverWriteEnabled || isServer) {
-                                      await updateVisitStatusServer({ session: state.session, visitId: visit.id, status: next });
-                                    }
-                                    if (!isServer) showToast(updateVisitStatus(visit.id, next).message + (serverWriteEnabled ? " (서버 반영 포함)" : ""));
-                                    else showToast(`상태 변경 완료 (${next})`);
-                                    if (serverSyncEnabled) await syncServerLists();
-                                  } catch (e: any) {
-                                    showToast(`상태 변경 실패: ${e?.message || e}`);
-                                  }
-                                }}>다음상태</button>
-                              )}
-                              <button type="button" onClick={async () => { try { if (serverWriteEnabled || isServer) await cancelVisitServer({ session: state.session, visitId: visit.id, reason: "UI 삭제" }); if (!isServer) showToast(removeVisitEntry(visit.id).message + ((serverWriteEnabled || isServer) ? " (서버 취소 포함)" : "")); else showToast("서버 접수 취소 완료"); if (serverSyncEnabled) await syncServerLists(); } catch (e: any) { showToast(`접수 서버 취소 실패: ${e?.message || e}`); } }}>삭제</button>
-                            </div></td>
+                            <td><div className="inline-btns"><button type="button" onClick={() => selectVisitForEdit(visit)}>수정</button><button type="button" onClick={async () => { try { if (serverWriteEnabled) await cancelVisitServer({ session: state.session, visitId: visit.id, reason: "UI 삭제" }); showToast(removeVisitEntry(visit.id).message + (serverWriteEnabled ? " (서버 취소 포함)" : "")); } catch (e: any) { showToast(`접수 서버 취소 실패: ${e?.message || e}`); } }}>삭제</button></div></td>
                           </tr>
                         );
                       })}

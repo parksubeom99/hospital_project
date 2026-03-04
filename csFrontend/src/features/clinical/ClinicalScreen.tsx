@@ -7,6 +7,7 @@ import { normalizeExamSelection, useHospital, EXAM_OPTIONS } from "@/shared/stor
 import type { ExamCategory, ExamOrderItem } from "@/shared/types/domain";
 import { formatRrnMasked } from "@/shared/lib/masking";
 import { STATUS_LABEL } from "@/shared/config/constants";
+import { getExamOrdersByVisitServer, getSoapServer, saveExamOrdersByVisitServer, saveSoapServer } from "@/shared/services/clinicalApi";
 
 export function ClinicalScreen() {
   const { state, patientsById, saveSoap, saveExamOrders } = useHospital();
@@ -24,6 +25,10 @@ export function ClinicalScreen() {
   });
   const [selectedItems, setSelectedItems] = useState<ExamOrderItem[]>([]);
   const [message, setMessage] = useState("");
+  const [serverWriteEnabled, setServerWriteEnabled] = useState(false);
+  const [serverSyncEnabled, setServerSyncEnabled] = useState(false);
+  const [syncLoading, setSyncLoading] = useState(false);
+  const [serverSyncedAt, setServerSyncedAt] = useState<string | null>(null);
 
   useEffect(() => {
     setSoap({
@@ -58,11 +63,52 @@ export function ClinicalScreen() {
     window.setTimeout(() => setMessage(""), 1800);
   };
 
+
+  const syncClinicalFromServer = async () => {
+    if (!state.session?.accessToken) return emit("실서버 IAM 로그인 후 동기화 가능합니다.");
+    if (!visitId) return emit("접수를 먼저 선택해주세요.");
+    try {
+      setSyncLoading(true);
+      const [soapRes, examRes] = await Promise.all([
+        getSoapServer({ session: state.session, visitId }),
+        getExamOrdersByVisitServer({ session: state.session, visitId }),
+      ]);
+      setSoap({
+        subjective: soapRes.subjective ?? '', objective: soapRes.objective ?? '', assessment: soapRes.assessment ?? '', plan: soapRes.plan ?? '',
+      });
+      setSelectedItems(examRes);
+      setServerSyncedAt(new Date().toLocaleTimeString('ko-KR'));
+      emit(`실서버 동기화 완료 (SOAP + 검사오더 ${examRes.length}건)`);
+    } catch (e: any) {
+      emit(`실서버 동기화 실패: ${e?.message || e}`);
+    } finally {
+      setSyncLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!serverSyncEnabled || !visitId) return;
+    void syncClinicalFromServer();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverSyncEnabled, visitId]);
+
   return (
     <RoleGate allowed={["DOC", "SYS"]}>
       <div className="page-grid page-grid--readable">
         <GlassCard title="진료" subtitle="SOAP + 검사/영상(복수 선택) · 의사/시스템관리자 전용">
           <div className="form-grid tri">
+            <div className="inline-check-group" style={{ gridColumn: "1 / -1" }}>
+              <label className={`pill-check ${serverWriteEnabled ? "is-on" : ""}`}>
+                <input type="checkbox" checked={serverWriteEnabled} onChange={(e) => setServerWriteEnabled(e.target.checked)} />
+                <span>실서버 저장 모드</span>
+              </label>
+              <label className={`pill-check ${serverSyncEnabled ? "is-on" : ""}`}>
+                <input type="checkbox" checked={serverSyncEnabled} onChange={(e) => setServerSyncEnabled(e.target.checked)} />
+                <span>실서버 동기화 모드</span>
+              </label>
+              <button type="button" onClick={() => void syncClinicalFromServer()} disabled={syncLoading}>동기화 실행</button>
+              {serverSyncedAt && <small className="muted">최근 동기화: {serverSyncedAt}</small>}
+            </div>
             <label>
               <span>접수 선택</span>
               <select value={visitId} onChange={(e) => setVisitId(Number(e.target.value))}>
@@ -97,7 +143,7 @@ export function ClinicalScreen() {
                 <label><span>P (Plan, 진료계획)</span><textarea value={soap.plan} onChange={(e) => setSoap(s => ({ ...s, plan: e.target.value }))} /></label>
               </div>
               <div className="button-row soap-save-row">
-                <button className="primary-btn" type="button" onClick={() => emit(saveSoap(visitId, soap).message)}>SOAP 저장</button>
+                <button className="primary-btn" type="button" onClick={async () => { try { if (serverWriteEnabled) await saveSoapServer({ session: state.session, visitId, soap }); emit(saveSoap(visitId, soap).message + (serverWriteEnabled ? " (서버 저장 포함)" : "")); } catch (e: any) { emit(`SOAP 서버 저장 실패: ${e?.message || e}`); } }}>SOAP 저장</button>
               </div>
             </GlassCard>
 
@@ -134,7 +180,7 @@ export function ClinicalScreen() {
               </div>
 
               <div className="button-row soap-save-row">
-                <button className="primary-btn" type="button" onClick={() => emit(saveExamOrders(visitId, selectedItems).message)}>
+                <button className="primary-btn" type="button" onClick={async () => { try { if (serverWriteEnabled) await saveExamOrdersByVisitServer({ session: state.session, visitId, items: selectedItems }); emit(saveExamOrders(visitId, selectedItems).message + (serverWriteEnabled ? " (서버 저장 포함)" : "")); } catch (e: any) { emit(`검사오더 서버 저장 실패: ${e?.message || e}`); } }}>
                   검사/영상 오더 저장
                 </button>
               </div>
