@@ -49,7 +49,7 @@ public class SecurityConfig {
                         //    (운영에서는 IP 제한/망 분리 등으로 보호하는 편이 일반적입니다.)
                         .requestMatchers("/health", "/actuator/**").permitAll()
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
-                        .requestMatchers("/auth/login").permitAll()
+                        .requestMatchers("/auth/login", "/auth/refresh", "/auth/logout").permitAll()
                         .requestMatchers(HttpMethod.POST, "/audit").permitAll()
                         .anyRequest().authenticated()
                 )

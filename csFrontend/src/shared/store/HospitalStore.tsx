@@ -6,6 +6,8 @@ import { getCapacityLevel } from "@/shared/lib/capacity";
 import { calcNights } from "@/shared/lib/date";
 import { buildInvoiceItems, totalAmount } from "@/shared/lib/price";
 import { isManualVisitTransitionAllowed, normalizeRoleCode } from "@/shared/lib/integrationBridge";
+import { loginAuth, logoutAuth, meAuth } from "@/shared/services/authApi";
+import { clearStoredAuthTokens, loadStoredAuthTokens, saveStoredAuthTokens } from "@/shared/services/tokenStorage";
 import type {
   CapacitySummary,
   ExamCategory,
@@ -128,6 +130,8 @@ interface HospitalContextValue {
   medicationCatalog: MedicationCatalogItem[];
   loginAs: (role: RoleCode) => void;
   loginWithCredentials: (payload: { username: string; password: string }) => ActionResult;
+  loginWithServerCredentials: (payload: { username: string; password: string }) => Promise<ActionResult>;
+  bootstrapAuthSession: () => Promise<ActionResult>;
   logout: () => void;
   resetDemoData: () => void;
   setEmergencyCount: (value: number) => ActionResult;
@@ -204,6 +208,24 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     }
   }, [state]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const tokens = loadStoredAuthTokens();
+    if (!tokens?.accessToken) return;
+    setState((prev) => {
+      if (!prev.session) return prev;
+      return {
+        ...prev,
+        session: {
+          ...prev.session,
+          accessToken: tokens.accessToken,
+          refreshToken: tokens.refreshToken,
+          tokenType: "Bearer",
+        },
+      };
+    });
+  }, []);
+
   const capacity = useMemo(() => buildCapacity(state), [state]);
 
   const patientsById = useMemo(() => {
@@ -225,12 +247,14 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     loginAs: (role) => {
       const displayName = role === "DOC" ? "의사 계정" : role === "ADMIN" ? "원무 계정" : "시스템관리자";
       const token = makeMockJwt({ sub: role, role, name: displayName, iat: Date.now() });
+      saveStoredAuthTokens({ accessToken: token, tokenType: "Bearer" });
       setState((prev) => ({ ...prev, session: { role, displayName, username: role.toLowerCase(), accessToken: token, tokenType: "Bearer" } }));
     },
     loginWithCredentials: ({ username, password }) => {
       const account = MOCK_ACCOUNTS.find((a) => a.username === username && a.password === password);
       if (!account) return { ok: false, message: "아이디 또는 비밀번호가 올바르지 않습니다." };
       const token = makeMockJwt({ sub: account.username, role: account.role, name: account.displayName, iat: Date.now() });
+      saveStoredAuthTokens({ accessToken: token, tokenType: "Bearer" });
       setState((prev) => ({
         ...prev,
         session: {
@@ -238,13 +262,65 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
           displayName: account.displayName,
           username: account.username,
           accessToken: token,
+          refreshToken: undefined,
           tokenType: "Bearer",
           doctorStaffId: (account as any).doctorStaffId,
         },
       }));
       return { ok: true, message: `${account.displayName} 로그인 성공` };
     },
-    logout: () => setState((prev) => ({ ...prev, session: null })),
+    loginWithServerCredentials: async ({ username, password }) => {
+      try {
+        const result = await loginAuth({ username, password });
+        const me = await meAuth().catch(() => result.user);
+        saveStoredAuthTokens({
+          accessToken: result.token.accessToken,
+          refreshToken: result.token.refreshToken,
+          tokenType: result.token.tokenType,
+        });
+        setState((prev) => ({
+          ...prev,
+          session: {
+            role: me.role,
+            displayName: me.displayName,
+            username: me.username || result.user.username,
+            accessToken: result.token.accessToken,
+            refreshToken: result.token.refreshToken,
+            tokenType: result.token.tokenType,
+            doctorStaffId: me.staffId,
+          },
+        }));
+        return { ok: true, message: `${me.displayName} 로그인 성공 (실서버)` };
+      } catch (e) {
+        const message = e instanceof Error ? e.message : "로그인 실패";
+        return { ok: false, message };
+      }
+    },
+    bootstrapAuthSession: async () => {
+      const tokens = loadStoredAuthTokens();
+      if (!tokens?.accessToken) return { ok: false, message: "저장된 토큰 없음" };
+      try {
+        const me = await meAuth();
+        setState((prev) => ({
+          ...prev,
+          session: {
+            role: me.role,
+            displayName: me.displayName,
+            username: me.username,
+            accessToken: tokens.accessToken,
+            refreshToken: tokens.refreshToken,
+            tokenType: "Bearer",
+            doctorStaffId: me.staffId,
+          },
+        }));
+        return { ok: true, message: "저장된 로그인 세션 복원 완료" };
+      } catch (e) {
+        clearStoredAuthTokens();
+        setState((prev) => ({ ...prev, session: null }));
+        return { ok: false, message: e instanceof Error ? e.message : "세션 복원 실패" };
+      }
+    },
+    logout: () => { void logoutAuth().catch(() => clearStoredAuthTokens()); setState((prev) => ({ ...prev, session: null })); },
     resetDemoData: () => setState(createSeedState()),
     setEmergencyCount: (value) => {
       if (!Number.isInteger(value) || value < 0 || value > MAX_EMERGENCY_COUNT) {

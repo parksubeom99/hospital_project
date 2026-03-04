@@ -7,6 +7,7 @@ export interface UserSession {
   displayName: string;
   username?: string;
   accessToken?: string;
+  refreshToken?: string;
   tokenType?: "Bearer";
   doctorStaffId?: number;
 }
