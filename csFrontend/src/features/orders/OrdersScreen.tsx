@@ -4,11 +4,18 @@ import { useEffect, useMemo, useState } from "react";
 import { GlassCard } from "@/shared/components/GlassCard";
 import { RoleGate } from "@/shared/components/RoleGate";
 import { computeAdmission, MEDICATION_CATALOG, useHospital } from "@/shared/store/HospitalStore";
-import type { FinalOrderMedicationItem } from "@/shared/types/domain";
+import type { FinalOrderInjectionItem, FinalOrderMedicationItem } from "@/shared/types/domain";
 import { calcNights, periodLabel } from "@/shared/lib/date";
 import { formatCurrency } from "@/shared/lib/format";
 
-type FinalOrderType = "MED" | "SURGERY" | "ADMISSION" | "NONE";
+type FinalOrderType = "MED" | "SURGERY" | "ADMISSION" | "INJECTION" | "NONE";
+
+const INJECTION_CATALOG: FinalOrderInjectionItem[] = [
+  { injectionCode: "INJ001", injectionName: "생리식염주사" },
+  { injectionCode: "INJ002", injectionName: "진통주사" },
+  { injectionCode: "INJ003", injectionName: "소염주사" },
+  { injectionCode: "INJ004", injectionName: "비타민주사" },
+];
 
 export function OrdersScreen() {
   const { state, patientsById, saveFinalOrder } = useHospital();
@@ -20,6 +27,7 @@ export function OrdersScreen() {
   const [visitId, setVisitId] = useState<number>(activeVisits[0]?.id ?? 0);
   const [types, setTypes] = useState<FinalOrderType[]>([]);
   const [medRows, setMedRows] = useState<FinalOrderMedicationItem[]>([]);
+  const [injectionRows, setInjectionRows] = useState<FinalOrderInjectionItem[]>([]);
   const [surgeryType, setSurgeryType] = useState<"INTERNAL" | "EXTERNAL">("INTERNAL");
   const [roomNo, setRoomNo] = useState<number>(1);
   const [wardNo, setWardNo] = useState<number>(1);
@@ -32,6 +40,7 @@ export function OrdersScreen() {
     if (!fo) return;
     setTypes([...fo.types] as FinalOrderType[]);
     setMedRows(fo.medications ?? []);
+    setInjectionRows(fo.injections ?? []);
     setSurgeryType(fo.surgery?.surgeryType ?? "INTERNAL");
     setRoomNo(fo.surgery?.roomNo ?? 1);
     setWardNo(fo.admission?.wardNo ?? 1);
@@ -63,6 +72,17 @@ export function OrdersScreen() {
 
   const removeMed = (idx: number) => setMedRows((prev) => prev.filter((_, i) => i !== idx));
 
+  const addInjection = () => {
+    const item = INJECTION_CATALOG[0];
+    setInjectionRows((prev) => [...prev, { ...item }]);
+  };
+  const updateInjection = (idx: number, code: string) => {
+    const item = INJECTION_CATALOG.find((it) => it.injectionCode === code);
+    if (!item) return;
+    setInjectionRows((prev) => prev.map((r, i) => (i === idx ? { ...item } : r)));
+  };
+  const removeInjection = (idx: number) => setInjectionRows((prev) => prev.filter((_, i) => i !== idx));
+
   const preview = useMemo(() => {
     let amount = 0;
     const rows: Array<{ label: string; amount: number }> = [];
@@ -71,6 +91,11 @@ export function OrdersScreen() {
       const medAmt = qty * 1000;
       amount += medAmt;
       rows.push({ label: `약제비 (${qty}개 × 1,000원)`, amount: medAmt });
+    }
+    if (types.includes("INJECTION")) {
+      const injAmt = injectionRows.length * 5000;
+      amount += injAmt;
+      rows.push({ label: `주사비 (${injectionRows.length}건 × 5,000원)`, amount: injAmt });
     }
     if (types.includes("SURGERY")) {
       const surgeryAmt = surgeryType === "INTERNAL" ? 50000 : 100000;
@@ -84,7 +109,7 @@ export function OrdersScreen() {
     }
     if (types.includes("NONE")) rows.push({ label: "이상소견없음 (즉시 완료)", amount: 0 });
     return { rows, amount };
-  }, [types, medRows, surgeryType, roomNo, wardNo, nights]);
+  }, [types, medRows, injectionRows, surgeryType, roomNo, wardNo, nights]);
 
   const emit = (msg: string) => {
     setMessage(msg);
@@ -93,8 +118,8 @@ export function OrdersScreen() {
 
   return (
     <RoleGate allowed={["DOC", "SYS"]}>
-      <div className="page-grid">
-        <GlassCard title="오더 (최종처방)" subtitle="약 / 수술 / 입원 / 이상소견없음(NONE)">
+      <div className="page-grid page-grid--readable">
+        <GlassCard title="오더 (최종처방)" subtitle="약 / 주사 / 수술 / 입원 / 이상소견없음(NONE)">
           <div className="form-grid tri">
             <label>
               <span>접수 선택</span>
@@ -112,10 +137,10 @@ export function OrdersScreen() {
               <small>복수 선택 가능, 단 NONE은 단독</small>
             </div>
             <div className="inline-check-group">
-              {(["MED", "SURGERY", "ADMISSION", "NONE"] as FinalOrderType[]).map((t) => (
+              {(["MED", "SURGERY", "ADMISSION", "INJECTION", "NONE"] as FinalOrderType[]).map((t) => (
                 <label key={t} className={`pill-check ${types.includes(t) ? "is-on" : ""}`}>
                   <input type="checkbox" checked={types.includes(t)} onChange={() => toggleType(t)} />
-                  <span>{t === "MED" ? "약제" : t === "SURGERY" ? "수술" : t === "ADMISSION" ? "입원" : "이상소견없음"}</span>
+                  <span>{t === "MED" ? "약제" : t === "SURGERY" ? "수술" : t === "ADMISSION" ? "입원" : t === "INJECTION" ? "주사" : "이상소견없음"}</span>
                 </label>
               ))}
             </div>
@@ -154,6 +179,24 @@ export function OrdersScreen() {
                     </div>
                   ))}
                   {medRows.length === 0 && <div className="muted">추가된 약제가 없습니다.</div>}
+                </div>
+              </GlassCard>
+
+              <GlassCard title="주사" subtitle="주사명 선택 / 수량 1개 고정 / 단가 5,000원" className="nested-card">
+                <div className="button-row">
+                  <button type="button" onClick={addInjection} disabled={!types.includes("INJECTION") || types.includes("NONE")}>주사 추가</button>
+                </div>
+                <div className="med-list">
+                  {injectionRows.map((row, idx) => (
+                    <div key={`${row.injectionCode}-${idx}`} className="med-row">
+                      <select value={row.injectionCode} onChange={(e) => updateInjection(idx, e.target.value)} disabled={!types.includes("INJECTION") || types.includes("NONE")}>
+                        {INJECTION_CATALOG.map((m) => <option key={m.injectionCode} value={m.injectionCode}>{m.injectionName}</option>)}
+                      </select>
+                      <input value={1} readOnly disabled />
+                      <button type="button" onClick={() => removeInjection(idx)}>삭제</button>
+                    </div>
+                  ))}
+                  {injectionRows.length === 0 && <div className="muted">추가된 주사가 없습니다.</div>}
                 </div>
               </GlassCard>
 
@@ -226,6 +269,7 @@ export function OrdersScreen() {
                       visitId,
                       types,
                       medications: types.includes("MED") ? medRows.filter((m) => m.qty > 0) : [],
+                      injections: types.includes("INJECTION") ? injectionRows : [],
                       surgery: types.includes("SURGERY") ? { surgeryType, roomNo } : undefined,
                       admission,
                     });

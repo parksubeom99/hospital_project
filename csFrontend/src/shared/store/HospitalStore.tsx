@@ -37,6 +37,30 @@ export const MEDICATION_CATALOG: MedicationCatalogItem[] = [
 
 const now = () => new Date().toISOString();
 
+function toBase64UrlUtf8(value: unknown): string {
+  const json = typeof value === "string" ? value : JSON.stringify(value);
+  const bytes = new TextEncoder().encode(json);
+  let binary = "";
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function makeMockJwt(payload: Record<string, unknown>): string {
+  const h = toBase64UrlUtf8({ alg: "HS256", typ: "JWT" });
+  const b = toBase64UrlUtf8(payload);
+  return `${h}.${b}.mock-signature`;
+}
+
+const MOCK_ACCOUNTS = [
+  { username: "sys123", password: "system", role: "SYS" as const, displayName: "시스템관리자" },
+  { username: "admin123", password: "administration", role: "ADMIN" as const, displayName: "원무직원" },
+  { username: "park123", password: "doctor", role: "DOC" as const, displayName: "박혁거세 의사", doctorStaffId: 3 },
+  { username: "kim123", password: "doctor", role: "DOC" as const, displayName: "김시민 의사", doctorStaffId: 2 },
+  { username: "lee123", password: "doctor", role: "DOC" as const, displayName: "이순신 의사", doctorStaffId: 1 },
+];
+
 function createSeedState(): HospitalState {
   const baseDate = new Date();
   baseDate.setHours(9, 0, 0, 0);
@@ -46,22 +70,22 @@ function createSeedState(): HospitalState {
     return d.toISOString();
   };
   return {
-    session: { role: "SYS", displayName: "시스템관리자" },
+    session: null,
     emergencyCount: 3,
     patients: [
       { id: 2001, name: "박서준", gender: "M", rrnFront: "982223", rrnBack: "1234567", phone: "010-8762-1111" },
       { id: 2002, name: "이지은", gender: "F", rrnFront: "990101", rrnBack: "2345678", phone: "010-3456-2222" },
-      { id: 2003, name: "김시민", gender: "M", rrnFront: "010321", rrnBack: "3456789", phone: "010-8888-3333" },
-      { id: 2004, name: "박혁거세", gender: "M", rrnFront: "030412", rrnBack: "4123456", phone: "010-2222-4444" },
+      { id: 2003, name: "김민수", gender: "M", rrnFront: "010321", rrnBack: "3456789", phone: "010-8888-3333" },
+      { id: 2004, name: "박민재", gender: "M", rrnFront: "030412", rrnBack: "4123456", phone: "010-2222-4444" },
       { id: 2005, name: "최수진", gender: "F", rrnFront: "950722", rrnBack: "2456123", phone: "010-3333-5555" },
-      { id: 2006, name: "정우성", gender: "M", rrnFront: "900101", rrnBack: "1987654", phone: "010-4444-6666" },
+      { id: 2006, name: "정수현", gender: "M", rrnFront: "900101", rrnBack: "1987654", phone: "010-4444-6666" },
       { id: 2007, name: "한가인", gender: "F", rrnFront: "920318", rrnBack: "2123456", phone: "010-1234-7777" },
       { id: 2008, name: "유재석", gender: "M", rrnFront: "760814", rrnBack: "1234567", phone: "010-5555-8888" },
     ],
     reservations: [
-      { id: 501, patientId: 2001, reservedAt: at(14, 30), status: "RESERVED", memo: "초진 예약" },
-      { id: 502, patientId: 2002, reservedAt: at(15, 0), status: "RESERVED", memo: "재진 예약" },
-      { id: 503, patientId: 2005, reservedAt: at(16, 20), status: "RESERVED", memo: "복약 상담" },
+      { id: 501, patientId: 2001, reservedAt: at(14, 30), status: "RESERVED", memo: "초진 예약", contactName: "박서준", contactPhone: "010-8762-1111" },
+      { id: 502, patientId: 2002, reservedAt: at(15, 0), status: "RESERVED", memo: "재진 예약", contactName: "이지은", contactPhone: "010-3456-2222" },
+      { id: 503, patientId: 2005, reservedAt: at(16, 20), status: "RESERVED", memo: "복약 상담", contactName: "최수진", contactPhone: "010-3333-5555" },
     ],
     visits: [
       { id: 11001, patientId: 2003, status: "WAITING", registeredAt: at(9, 12), queueNo: "A-001", visitType: "WALK_IN" },
@@ -103,11 +127,17 @@ interface HospitalContextValue {
   capacity: CapacitySummary;
   medicationCatalog: MedicationCatalogItem[];
   loginAs: (role: RoleCode) => void;
+  loginWithCredentials: (payload: { username: string; password: string }) => ActionResult;
   logout: () => void;
   resetDemoData: () => void;
   setEmergencyCount: (value: number) => ActionResult;
   addReservation: (payload: { patientId: number; reservedAt: string; memo?: string }) => ActionResult;
+  createReservationEntry: (payload: { name: string; phone: string; reservedAt: string }) => ActionResult;
+  updateReservationEntry: (reservationId: number, payload: { name: string; phone: string; reservedAt: string }) => ActionResult;
   addVisit: (payload: { patientId: number; visitType: "WALK_IN" | "RESERVATION" }) => ActionResult;
+  registerVisitEntry: (payload: { mode: "WALK_IN" | "RESERVATION"; reservationId?: number; patientName: string; gender: "M" | "F"; rrnFront: string; rrnBack: string; phone: string }) => ActionResult;
+  updateVisitEntry: (visitId: number, payload: { patientName: string; gender: "M" | "F"; rrnFront: string; rrnBack: string; phone: string; status: VisitStatus }) => ActionResult;
+  removeVisitEntry: (visitId: number) => ActionResult;
   updateVisitStatus: (visitId: number, status: VisitStatus) => ActionResult;
   getUnmaskedRrn: (visitId: number, reason?: string) => { ok: boolean; rrn?: string; message: string };
   saveSoap: (visitId: number, data: { subjective: string; objective: string; assessment: string; plan: string }) => ActionResult;
@@ -193,9 +223,26 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     medicationCatalog: MEDICATION_CATALOG,
     patientsById,
     loginAs: (role) => {
-      const displayName =
-        role === "DOC" ? "의사 계정" : role === "ADMIN" ? "원무 계정" : "시스템관리자";
-      setState((prev) => ({ ...prev, session: { role, displayName } }));
+      const displayName = role === "DOC" ? "의사 계정" : role === "ADMIN" ? "원무 계정" : "시스템관리자";
+      const token = makeMockJwt({ sub: role, role, name: displayName, iat: Date.now() });
+      setState((prev) => ({ ...prev, session: { role, displayName, username: role.toLowerCase(), accessToken: token, tokenType: "Bearer" } }));
+    },
+    loginWithCredentials: ({ username, password }) => {
+      const account = MOCK_ACCOUNTS.find((a) => a.username === username && a.password === password);
+      if (!account) return { ok: false, message: "아이디 또는 비밀번호가 올바르지 않습니다." };
+      const token = makeMockJwt({ sub: account.username, role: account.role, name: account.displayName, iat: Date.now() });
+      setState((prev) => ({
+        ...prev,
+        session: {
+          role: account.role,
+          displayName: account.displayName,
+          username: account.username,
+          accessToken: token,
+          tokenType: "Bearer",
+          doctorStaffId: (account as any).doctorStaffId,
+        },
+      }));
+      return { ok: true, message: `${account.displayName} 로그인 성공` };
     },
     logout: () => setState((prev) => ({ ...prev, session: null })),
     resetDemoData: () => setState(createSeedState()),
@@ -210,40 +257,87 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
       return { ok: true, message: `응급 카운터를 ${value}명으로 변경했습니다.` };
     },
     addReservation: ({ patientId, reservedAt, memo }) => {
+      const patient = state.patients.find((p) => p.id === patientId);
       const cap = guardedCapacity(1);
       if (!cap.ok) return cap;
       const nextId = Math.max(500, ...state.reservations.map(r => r.id)) + 1;
       setState((prev) => ({
         ...prev,
-        reservations: [...prev.reservations, { id: nextId, patientId, reservedAt, status: "RESERVED", memo }],
+        reservations: [...prev.reservations, { id: nextId, patientId, reservedAt, status: "RESERVED", memo, contactName: patient?.name, contactPhone: patient?.phone }],
       }));
       return { ok: true, message: "예약 등록 완료" };
     },
+    createReservationEntry: ({ name, phone, reservedAt }) => {
+      const cap = guardedCapacity(1);
+      if (!cap.ok) return cap;
+      if (!name.trim() || !phone.trim() || !reservedAt) return { ok: false, message: "이름/전화번호/예약시간대를 입력해주세요." };
+      const nextPatientId = Math.max(2000, ...state.patients.map((p) => p.id)) + 1;
+      const nextReservationId = Math.max(500, ...state.reservations.map((r) => r.id)) + 1;
+      setState((prev) => ({
+        ...prev,
+        patients: [...prev.patients, { id: nextPatientId, name: name.trim(), gender: "M", rrnFront: "000000", rrnBack: "1000000", phone: phone.trim() }],
+        reservations: [...prev.reservations, { id: nextReservationId, patientId: nextPatientId, reservedAt, status: "RESERVED", contactName: name.trim(), contactPhone: phone.trim(), memo: "신규 예약" }],
+      }));
+      return { ok: true, message: "신규 예약 등록 완료" };
+    },
+    updateReservationEntry: (reservationId, payload) => {
+      const target = state.reservations.find((r) => r.id === reservationId);
+      if (!target) return { ok: false, message: "예약 정보를 찾을 수 없습니다." };
+      setState((prev) => ({
+        ...prev,
+        reservations: prev.reservations.map((r) => r.id === reservationId ? { ...r, reservedAt: payload.reservedAt, contactName: payload.name.trim(), contactPhone: payload.phone.trim() } : r),
+        patients: prev.patients.map((p) => p.id === target.patientId ? { ...p, name: payload.name.trim(), phone: payload.phone.trim() } : p),
+      }));
+      return { ok: true, message: "예약 수정 완료" };
+    },
     addVisit: ({ patientId, visitType }) => {
+      const p = state.patients.find((it) => it.id === patientId);
+      if (!p) return { ok: false, message: "환자 정보를 찾을 수 없습니다." };
       const cap = guardedCapacity(1);
       if (!cap.ok) return cap;
       const nextId = Math.max(11000, ...state.visits.map(v => v.id)) + 1;
       const seq = state.visits.filter(v => v.registeredAt.slice(0, 10) === new Date().toISOString().slice(0, 10)).length + 1;
       setState((prev) => ({
         ...prev,
-        visits: [
-          ...prev.visits,
-          {
-            id: nextId,
-            patientId,
-            status: "WAITING",
-            registeredAt: now(),
-            queueNo: `A-${String(seq).padStart(3, "0")}`,
-            visitType,
-          },
-        ],
-        reservations: prev.reservations.map((r) =>
-          visitType === "RESERVATION" && r.patientId === patientId && r.status === "RESERVED"
-            ? { ...r, status: "CHECKED_IN" }
-            : r
-        ),
+        visits: [...prev.visits, { id: nextId, patientId, status: "WAITING", registeredAt: now(), queueNo: `A-${String(seq).padStart(3, "0")}`, visitType }],
+        reservations: prev.reservations.map((r) => visitType === "RESERVATION" && r.patientId === patientId && r.status === "RESERVED" ? { ...r, status: "CHECKED_IN" } : r),
       }));
       return { ok: true, message: "접수 등록 완료" };
+    },
+    registerVisitEntry: ({ mode, reservationId, patientName, gender, rrnFront, rrnBack, phone }) => {
+      if (!patientName.trim() || !rrnFront.trim() || !rrnBack.trim()) return { ok: false, message: "환자명/주민번호를 입력해주세요." };
+      const cap = guardedCapacity(1);
+      if (!cap.ok) return cap;
+      const targetReservation = reservationId ? state.reservations.find((r) => r.id === reservationId) : undefined;
+      let patientId = targetReservation?.patientId;
+      if (!patientId) {
+        const existing = state.patients.find((p) => p.name === patientName.trim() && p.phone === phone.trim());
+        patientId = existing?.id;
+      }
+      const nextPatientId = Math.max(2000, ...state.patients.map((p) => p.id)) + 1;
+      const nextVisitId = Math.max(11000, ...state.visits.map((v) => v.id)) + 1;
+      const seq = state.visits.filter(v => v.registeredAt.slice(0, 10) === new Date().toISOString().slice(0, 10)).length + 1;
+      setState((prev) => ({
+        ...prev,
+        patients: patientId ? prev.patients.map((p) => p.id === patientId ? { ...p, name: patientName.trim(), gender, rrnFront, rrnBack, phone: phone.trim() } : p) : [...prev.patients, { id: nextPatientId, name: patientName.trim(), gender, rrnFront, rrnBack, phone: phone.trim() }],
+        visits: [...prev.visits, { id: nextVisitId, patientId: patientId ?? nextPatientId, status: "WAITING", registeredAt: now(), queueNo: `A-${String(seq).padStart(3, "0")}`, visitType: mode, sourceReservationId: reservationId }],
+        reservations: prev.reservations.map((r) => reservationId && r.id === reservationId ? { ...r, status: "CHECKED_IN" } : r),
+      }));
+      return { ok: true, message: mode === "RESERVATION" ? "예약내원 접수 완료" : "현장 접수 등록 완료" };
+    },
+    updateVisitEntry: (visitId, payload) => {
+      const visit = state.visits.find((v) => v.id === visitId);
+      if (!visit) return { ok: false, message: "접수 정보를 찾을 수 없습니다." };
+      setState((prev) => ({
+        ...prev,
+        visits: prev.visits.map((v) => v.id === visitId ? { ...v, status: payload.status } : v),
+        patients: prev.patients.map((p) => p.id === visit.patientId ? { ...p, name: payload.patientName.trim(), gender: payload.gender, rrnFront: payload.rrnFront, rrnBack: payload.rrnBack, phone: payload.phone.trim() } : p),
+      }));
+      return { ok: true, message: "접수 수정 완료" };
+    },
+    removeVisitEntry: (visitId) => {
+      setState((prev) => ({ ...prev, visits: prev.visits.filter((v) => v.id !== visitId) }));
+      return { ok: true, message: "접수 삭제 완료" };
     },
     updateVisitStatus: (visitId, status) => {
       const target = state.visits.find((v) => v.id === visitId);
@@ -352,9 +446,6 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     payInvoice: (invoiceId, method) => {
       const invoice = state.invoices.find((i) => i.invoiceId === invoiceId);
       if (!invoice) return { ok: false, message: "영수증을 찾을 수 없습니다." };
-      const finalOrder = state.finalOrders[invoice.visitId];
-      const types = finalOrder?.types ?? [];
-      const medOnly = types.length > 0 && types.every((t) => t === "MED");
       setState((prev) => ({
         ...prev,
         invoices: prev.invoices.map((i) =>
@@ -362,12 +453,10 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
         ),
         visits: prev.visits.map((v) => {
           if (v.id !== invoice.visitId) return v;
-          if (medOnly) return { ...v, status: "COMPLETED" };
-          return v;
+          return { ...v, status: "COMPLETED" };
         }),
       }));
-      const message = medOnly ? "결제 완료 + 약제만 처방 규칙으로 방문 완료 처리" : "결제 완료 (수술/입원 포함으로 자동 완료 미적용)";
-      return { ok: true, message };
+      return { ok: true, message: "결제 완료 + 진료완료 상태 반영" };
     },
     upsertStaff: (staff) => {
       setState((prev) => {
@@ -420,7 +509,8 @@ export const EXAM_OPTIONS: Record<ExamCategory, ExamOrderItem[]> = {
     { category: "RAD", code: "RAD_NONE", name: "검사없음" },
   ],
   PROC: [
-    { category: "PROC", code: "PROC_ENDOSCOPY", name: "내시경검사" },
+    { category: "PROC", code: "PROC_GASTRO", name: "위내시경" },
+    { category: "PROC", code: "PROC_COLON", name: "대장내시경" },
     { category: "PROC", code: "PROC_NONE", name: "검사없음" },
   ],
 };

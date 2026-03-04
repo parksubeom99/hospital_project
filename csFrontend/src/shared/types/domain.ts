@@ -5,6 +5,10 @@ export type CapacityLevel = "SAFE" | "WARN" | "DANGER" | "FULL";
 export interface UserSession {
   role: RoleCode;
   displayName: string;
+  username?: string;
+  accessToken?: string;
+  tokenType?: "Bearer";
+  doctorStaffId?: number;
 }
 
 export interface Patient {
@@ -22,6 +26,8 @@ export interface Reservation {
   reservedAt: string; // ISO
   status: "RESERVED" | "CHECKED_IN" | "CANCELLED";
   memo?: string;
+  contactName?: string;
+  contactPhone?: string;
 }
 
 export interface Visit {
@@ -32,6 +38,7 @@ export interface Visit {
   queueNo: string;
   visitType: "WALK_IN" | "RESERVATION";
   cancelled?: boolean;
+  sourceReservationId?: number;
 }
 
 export interface SoapNote {
@@ -76,17 +83,23 @@ export interface FinalOrderAdmission {
   nights: number;
 }
 
+export interface FinalOrderInjectionItem {
+  injectionCode: string;
+  injectionName: string;
+}
+
 export interface FinalOrderDraft {
   visitId: number;
-  types: Array<"MED" | "SURGERY" | "ADMISSION" | "NONE">;
+  types: Array<"MED" | "SURGERY" | "ADMISSION" | "NONE" | "INJECTION">;
   medications: FinalOrderMedicationItem[];
+  injections?: FinalOrderInjectionItem[];
   surgery?: FinalOrderSurgery;
   admission?: FinalOrderAdmission;
   updatedAt: string;
 }
 
 export interface InvoiceItem {
-  itemType: "MED" | "SURGERY" | "ADMISSION";
+  itemType: "MED" | "SURGERY" | "ADMISSION" | "INJECTION";
   itemName: string;
   qty: number;
   unitPrice: number;

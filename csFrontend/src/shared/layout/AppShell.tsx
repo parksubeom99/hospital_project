@@ -40,7 +40,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
           <div className="header-user">
             <span className={`header-user__role ${role ? "" : "is-empty"}`}>
-              {role ? `${ROLE_LABEL[role]}(${role})` : "로그인 안됨"}
+              {role ? `${state.session?.displayName ?? ROLE_LABEL[role]}(${role})` : "로그아웃"}
             </span>
             <Link href="/login" className="header-user__btn">로그인</Link>
             <button type="button" className="header-user__ghost" onClick={resetDemoData}>데모초기화</button>

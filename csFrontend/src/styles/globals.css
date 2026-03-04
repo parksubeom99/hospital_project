@@ -164,7 +164,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .header-user {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 .header-user__role {
   padding: 8px 10px;
@@ -192,7 +192,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 
 .page-grid {
   display: grid;
-  gap: 16px;
+  gap: 18px;
 }
 .page-grid.single { max-width: 980px; margin: 0 auto; }
 
@@ -206,12 +206,12 @@ button:disabled { opacity: .45; cursor: not-allowed; }
     0 18px 44px rgba(0, 0, 0, .22),
     inset 0 1px 0 rgba(255,255,255,.12);
 }
-.glass-card__header {
+ .glass-card__header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 }
 .glass-card__title {
   margin: 0;
@@ -256,6 +256,16 @@ button:disabled { opacity: .45; cursor: not-allowed; }
     inset 0 -20px 30px rgba(0,0,0,.16),
     0 10px 28px rgba(0,0,0,.26);
 }
+.donut3d__ring::after {
+  content: "";
+  position: absolute;
+  inset: -14px;
+  border-radius: 50%;
+  pointer-events: none;
+  background: var(--ring-gradient);
+  filter: blur(18px) saturate(1.05);
+  opacity: .42;
+}
 .donut3d__ring::before {
   content: "";
   position: absolute;
@@ -283,7 +293,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 }
 .donut3d__value {
   font-size: 2rem;
-  font-weight: 800;
+  font-weight: 600; /* [CHANGED] 800 -> 600 (중앙 숫자 강조 완화) */
   line-height: 1;
   color: #ffffff;                 /* [NEW] 중앙 9 흰색 */
 }
@@ -332,7 +342,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .capacity-banner p { margin: 4px 0 0; color: rgba(255,255,255,.90); font-size: .9rem; } /* [CHANGED] */
 .capacity-banner__count {
   font-size: 1.4rem;
-  font-weight: 800;
+  font-weight: 600; /* [CHANGED] 800 -> 600 (운영제한 숫자 두께 완화) */
   color: #ffffff;                 /* [CHANGED] 9/30 흰색 */
 }
 
@@ -407,7 +417,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .form-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  gap: 14px;
 }
 .form-grid.tri { grid-template-columns: 1.1fr 1.1fr 1fr; }
 .form-grid label {
@@ -422,7 +432,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   display: grid;
   align-content: end;
 }
-.button-row {
+ .button-row {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -447,7 +457,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .split-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  gap: 14px;
 }
 .emergency-grid { align-items: start; }
 
@@ -524,7 +534,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 
 .soap-grid {
   display: grid;
-  gap: 10px;
+  gap: 12px;
 }
 .soap-grid label { display: grid; gap: 6px; }
 .soap-grid span { color: var(--muted); font-size: .85rem; }
@@ -532,7 +542,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .order-check-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
+  gap: 12px;
 }
 .check-panel {
   border-radius: 12px;
@@ -698,11 +708,226 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   .dashboard-grid { grid-template-columns: 1fr; }
   .order-check-grid { grid-template-columns: 1fr; }
 }
+
+
+.phone-split {
+  display: grid;
+  grid-template-columns: 72px 1fr 1fr;
+  gap: 8px;
+}
+.phone-split input[readonly] {
+  text-align: center;
+  opacity: .95;
+}
+.phone-split__sep {
+  display: none;
+}
+.email-split {
+  display: grid;
+  grid-template-columns: 1fr auto 160px;
+  gap: 8px;
+  align-items: center;
+}
+.email-split > span { color: var(--muted); }
+.email-domain-custom { margin-top: 8px; }
+.field-stack { display: grid; gap: 8px; }
 @media (max-width: 980px) {
+  .phone-split { grid-template-columns: 64px 1fr 1fr; }
+  .email-split { grid-template-columns: 1fr auto 120px; }
   .top-header { grid-template-columns: 1fr; align-items: stretch; }
   .top-nav { justify-content: flex-start; }
   .header-user { flex-wrap: wrap; }
   .split-grid { grid-template-columns: 1fr; }
   .form-grid.tri { grid-template-columns: 1fr; }
   .role-card-grid { grid-template-columns: 1fr; }
+}
+
+/* ===== [NEW] 1차 가독성 개선: 접수/진료/오더/수납/마스터설정 전용 ===== */
+.page-grid--readable .glass-card__title {
+  color: #1d2e45;
+  text-shadow: 0 1px 0 rgba(255,255,255,.12);
+}
+.page-grid--readable .glass-card__subtitle {
+  color: #3f79b7;
+}
+.page-grid--readable .muted,
+.page-grid--readable .empty-state.muted,
+.page-grid--readable .warning-inline {
+  color: #4f6682;
+}
+.page-grid--readable .form-grid label > span,
+.page-grid--readable .soap-grid span,
+.page-grid--readable .info-pill span,
+.page-grid--readable .info-pill small {
+  color: #5b738f;
+  font-weight: 600;
+}
+.page-grid--readable .info-pill,
+.page-grid--readable .check-panel,
+.page-grid--readable .order-selected-list,
+.page-grid--readable .summary-box,
+.page-grid--readable .info-panel,
+.page-grid--readable .pill-check,
+.page-grid--readable .check-item {
+  border-color: rgba(122, 165, 214, .24);
+  background: rgba(255,255,255,.10);
+}
+.page-grid--readable .info-pill strong,
+.page-grid--readable .check-panel h4,
+.page-grid--readable .summary-row,
+.page-grid--readable .summary-row > span,
+.page-grid--readable .summary-row > strong,
+.page-grid--readable .receipt-footer,
+.page-grid--readable .receipt-total,
+.page-grid--readable .counter-big {
+  color: #22364f;
+}
+.page-grid--readable .check-item,
+.page-grid--readable .order-selected-list li,
+.page-grid--readable .pill-check span {
+  color: #2b4360;
+  font-weight: 600;
+}
+.page-grid--readable input,
+.page-grid--readable select,
+.page-grid--readable textarea {
+  color: #eef6ff;
+  border-color: rgba(185, 217, 250, .40);
+  background: rgba(39, 72, 116, .52);
+}
+.page-grid--readable input::placeholder,
+.page-grid--readable textarea::placeholder {
+  color: rgba(238,246,255,.72);
+}
+.page-grid--readable .tab-btn,
+.page-grid--readable .button-row button:not(.primary-btn),
+.page-grid--readable .inline-btns button,
+.page-grid--readable .header-user__ghost {
+  color: #edf6ff;
+}
+.page-grid--readable .ui-table th {
+  color: #223449;
+  background: rgba(255,255,255,.12);
+}
+.page-grid--readable .ui-table td {
+  color: #24384f;
+}
+
+/* ===== [NEW] 마스터 설정 목록 표 레이아웃 깨짐(세로 줄바꿈) 방지 ===== */
+.master-profile-table {
+  min-width: 980px;
+  table-layout: auto;
+}
+.master-profile-table th,
+.master-profile-table td {
+  white-space: nowrap;
+  word-break: keep-all;
+}
+.master-profile-table th:nth-child(1), .master-profile-table td:nth-child(1) { min-width: 44px; }
+.master-profile-table th:nth-child(2), .master-profile-table td:nth-child(2) { min-width: 54px; }
+.master-profile-table th:nth-child(3), .master-profile-table td:nth-child(3) { min-width: 84px; }
+.master-profile-table th:nth-child(4), .master-profile-table td:nth-child(4) { min-width: 84px; }
+.master-profile-table th:nth-child(5), .master-profile-table td:nth-child(5) { min-width: 110px; }
+.master-profile-table th:nth-child(6), .master-profile-table td:nth-child(6) { min-width: 120px; }
+.master-profile-table th:nth-child(7), .master-profile-table td:nth-child(7) { min-width: 170px; }
+.master-profile-table th:nth-child(8), .master-profile-table td:nth-child(8) { min-width: 96px; }
+.master-profile-table td:nth-child(7) {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ===== [NEW] 2차 기능/가독성 미세 조정 ===== */
+.soap-grid--spaced {
+  gap: 14px;
+}
+.soap-grid--spaced label {
+  display: grid;
+  gap: 8px;
+}
+.soap-grid--spaced textarea {
+  margin-top: 2px;
+}
+.soap-save-row {
+  margin-top: 10px;
+}
+.order-selected-list--spaced {
+  margin-top: 12px;
+}
+.donut3d__ring {
+  background-size: 100% 100%;
+  outline: 1px solid rgba(255,255,255,.12);
+}
+.inline-btns { display:flex; gap:6px; flex-wrap:wrap; }
+.inline-btns button { white-space: nowrap; }
+
+
+.block-stack { display: grid; gap: 14px; }
+.nested-card + .nested-card { margin-top: 2px; }
+
+
+/* ===== [NEW] 최종 UI 마감: 박스 간격/마스터 폼 깨짐 보정 ===== */
+.glass-card > div > * + * {
+  margin-top: 10px;
+}
+.page-grid--readable .glass-card > div > .split-grid,
+.page-grid--readable .glass-card > div > .block-stack,
+.page-grid--readable .glass-card > div > .form-grid,
+.page-grid--readable .glass-card > div > .table-wrap,
+.page-grid--readable .glass-card > div > .button-row {
+  margin-top: 12px;
+}
+.page-grid--readable .split-grid {
+  gap: 16px;
+}
+.page-grid--readable .info-pill + .info-pill,
+.page-grid--readable .summary-box + .summary-box,
+.page-grid--readable .table-wrap + .button-row,
+.page-grid--readable .button-row + .table-wrap {
+  margin-top: 12px;
+}
+.master-form-grid {
+  row-gap: 14px;
+  column-gap: 16px;
+}
+.master-form-grid__phone {
+  grid-column: 1 / span 3;
+}
+.master-form-grid__email {
+  grid-column: 1 / span 3;
+}
+.master-form-grid .phone-split {
+  grid-template-columns: 72px minmax(92px, 120px) minmax(92px, 120px);
+  width: fit-content;
+}
+.master-form-grid .email-split {
+  grid-template-columns: minmax(120px, 1fr) auto minmax(170px, 220px);
+}
+.master-form-grid .email-domain-custom {
+  max-width: 380px;
+}
+.master-form-grid .phone-split input,
+.master-form-grid .email-split input,
+.master-form-grid .email-split select,
+.master-form-grid .email-domain-custom {
+  min-width: 0;
+}
+.page-grid--readable .inline-btns {
+  gap: 8px;
+}
+.page-grid--readable .inline-btns button {
+  margin: 0;
+}
+@media (max-width: 980px) {
+  .master-form-grid__phone,
+  .master-form-grid__email {
+    grid-column: 1;
+  }
+  .master-form-grid .phone-split {
+    width: 100%;
+    grid-template-columns: 64px 1fr 1fr;
+  }
+  .master-form-grid .email-split {
+    grid-template-columns: 1fr auto minmax(120px, 1fr);
+  }
 }

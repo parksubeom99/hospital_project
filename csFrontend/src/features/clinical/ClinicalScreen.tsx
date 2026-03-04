@@ -5,7 +5,7 @@ import { GlassCard } from "@/shared/components/GlassCard";
 import { RoleGate } from "@/shared/components/RoleGate";
 import { normalizeExamSelection, useHospital, EXAM_OPTIONS } from "@/shared/store/HospitalStore";
 import type { ExamCategory, ExamOrderItem } from "@/shared/types/domain";
-import { formatRrnMasked, maskName } from "@/shared/lib/masking";
+import { formatRrnMasked } from "@/shared/lib/masking";
 import { STATUS_LABEL } from "@/shared/config/constants";
 
 export function ClinicalScreen() {
@@ -60,7 +60,7 @@ export function ClinicalScreen() {
 
   return (
     <RoleGate allowed={["DOC", "SYS"]}>
-      <div className="page-grid">
+      <div className="page-grid page-grid--readable">
         <GlassCard title="진료" subtitle="SOAP + 검사/영상(복수 선택) · 의사/시스템관리자 전용">
           <div className="form-grid tri">
             <label>
@@ -70,7 +70,7 @@ export function ClinicalScreen() {
                   const p = patientsById[v.patientId];
                   return (
                     <option key={v.id} value={v.id}>
-                      {v.id} / {p ? maskName(p.name) : "-"} / {v.status}
+                      {v.id} / {p ? p.name : "-"} / {v.status}
                     </option>
                   );
                 })}
@@ -89,23 +89,23 @@ export function ClinicalScreen() {
           </div>
 
           <div className="split-grid">
-            <GlassCard title="SOAP 입력" className="nested-card">
-              <div className="soap-grid">
-                <label><span>S (주관적)</span><textarea value={soap.subjective} onChange={(e) => setSoap(s => ({ ...s, subjective: e.target.value }))} /></label>
-                <label><span>O (객관적)</span><textarea value={soap.objective} onChange={(e) => setSoap(s => ({ ...s, objective: e.target.value }))} /></label>
-                <label><span>A (평가)</span><textarea value={soap.assessment} onChange={(e) => setSoap(s => ({ ...s, assessment: e.target.value }))} /></label>
-                <label><span>P (계획)</span><textarea value={soap.plan} onChange={(e) => setSoap(s => ({ ...s, plan: e.target.value }))} /></label>
+            <GlassCard title="SOAP 입력" className="nested-card soap-panel-card">
+              <div className="soap-grid soap-grid--spaced">
+                <label><span>S (Subjective, 환자 증세)</span><textarea value={soap.subjective} onChange={(e) => setSoap(s => ({ ...s, subjective: e.target.value }))} /></label>
+                <label><span>O (Objective, 의사 소견)</span><textarea value={soap.objective} onChange={(e) => setSoap(s => ({ ...s, objective: e.target.value }))} /></label>
+                <label><span>A (Assessment, 평가)</span><textarea value={soap.assessment} onChange={(e) => setSoap(s => ({ ...s, assessment: e.target.value }))} /></label>
+                <label><span>P (Plan, 진료계획)</span><textarea value={soap.plan} onChange={(e) => setSoap(s => ({ ...s, plan: e.target.value }))} /></label>
               </div>
-              <div className="button-row">
+              <div className="button-row soap-save-row">
                 <button className="primary-btn" type="button" onClick={() => emit(saveSoap(visitId, soap).message)}>SOAP 저장</button>
               </div>
             </GlassCard>
 
-            <GlassCard title="검사 / 영상 / 시술 오더" subtitle="'없음'은 같은 그룹 내 상호배타" className="nested-card">
+            <GlassCard title="기본검사 / 영상 / 내시경검사 오더" subtitle="'없음'은 같은 그룹 내 상호배타" className="nested-card">
               <div className="order-check-grid">
                 {(["LAB", "RAD", "PROC"] as ExamCategory[]).map((category) => (
                   <div key={category} className="check-panel">
-                    <h4>{category === "LAB" ? "검사(LAB)" : category === "RAD" ? "영상(RAD)" : "시술/검사(PROC)"}</h4>
+                    <h4>{category === "LAB" ? "기본검사(LAB)" : category === "RAD" ? "영상(RAD)" : "내시경검사(PROC)"}</h4>
                     <div className="check-list">
                       {EXAM_OPTIONS[category].map((item) => {
                         const checked = selectedItems.some((s) => s.code === item.code);
@@ -125,7 +125,7 @@ export function ClinicalScreen() {
                 ))}
               </div>
 
-              <div className="order-selected-list">
+              <div className="order-selected-list order-selected-list--spaced">
                 <strong>선택 결과</strong>
                 <ul>
                   {selectedItems.map((i) => <li key={i.code}>{i.category} · {i.name}</li>)}
@@ -133,7 +133,7 @@ export function ClinicalScreen() {
                 </ul>
               </div>
 
-              <div className="button-row">
+              <div className="button-row soap-save-row">
                 <button className="primary-btn" type="button" onClick={() => emit(saveExamOrders(visitId, selectedItems).message)}>
                   검사/영상 오더 저장
                 </button>

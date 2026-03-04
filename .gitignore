@@ -7,6 +7,9 @@ Thumbs.db
 *.iml
 out/
 
+# ===== VSCode (선택) =====
+.vscode/
+
 # ===== Logs =====
 *.log
 logs/
@@ -15,7 +18,7 @@ logs/
 **/build/
 **/.gradle/
 
-# Gradle wrapper cache-like files (keep wrapper scripts/jar/properties except cache)
+# Gradle wrapper cache-like files
 # (보통 gradlew, gradlew.bat, gradle/wrapper 는 커밋함)
 
 # ===== Frontend (Node / Next.js) =====
@@ -23,6 +26,10 @@ csFrontend/node_modules/
 csFrontend/.next/
 csFrontend/out/
 csFrontend/.vercel/
+
+# Next / TypeScript build cache
+csFrontend/*.tsbuildinfo
+**/*.tsbuildinfo
 
 # ===== Env / secrets =====
 .env
@@ -33,5 +40,8 @@ csFrontend/.vercel/
 *.tmp
 *.temp
 
-# ===== VSCode (선택) =====
-.vscode/
+# ===== Optional local work folders (if created INSIDE repo) =====
+# /a/
+# /b/
+# /c/
+# /d/

@@ -33,7 +33,7 @@ export function BillingScreen() {
 
   return (
     <RoleGate allowed={["ADMIN", "SYS"]}>
-      <div className="page-grid">
+      <div className="page-grid page-grid--readable">
         <GlassCard title="수납" subtitle="최종오더 결과 기반 영수증 자동 산출 / 결제 처리">
           <div className="form-grid tri">
             <label>
@@ -49,7 +49,7 @@ export function BillingScreen() {
             <div className="info-pill">
               <span>환자</span>
               <strong>{patient ? patient.name : "선택 없음"}</strong>
-              <small>결제 후 규칙: 약제만 처방이면 완료 처리</small>
+              <small>결제 후 규칙: 수납 완료 시 진료완료 처리</small>
             </div>
             <div className="button-row">
               <button type="button" className="primary-btn" onClick={() => emit(generateInvoiceFromFinalOrder(visitId).message)}>
@@ -71,6 +71,12 @@ export function BillingScreen() {
                       <strong>{finalOrder.medications.map((m) => `${m.drugName} x${m.qty}`).join(", ")}</strong>
                     </div>
                   )}
+                  {(finalOrder.injections ?? []).length > 0 && (
+                    <div className="summary-row">
+                      <span>주사</span>
+                      <strong>{(finalOrder.injections ?? []).map((m) => m.injectionName).join(", ")}</strong>
+                    </div>
+                  )}
                   {finalOrder.surgery && (
                     <div className="summary-row">
                       <span>수술</span>
@@ -87,7 +93,7 @@ export function BillingScreen() {
               )}
             </GlassCard>
 
-            <GlassCard title="영수증 미리보기" subtitle="약 1,000 / 내과수술 50,000 / 외과수술 100,000 / 입원 1박 10,000" className="nested-card">
+            <GlassCard title="영수증 미리보기" subtitle="약 1,000 / 주사 5,000 / 내과수술 50,000 / 외과수술 100,000 / 입원 1박 10,000" className="nested-card">
               {!latestInvoice ? (
                 <div className="empty-state muted">영수증이 아직 생성되지 않았습니다.</div>
               ) : (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { GlassCard } from "@/shared/components/GlassCard";
 import { RoleGate } from "@/shared/components/RoleGate";
 import { StatusBadge } from "@/shared/components/StatusBadge";
@@ -8,118 +8,218 @@ import { useHospital } from "@/shared/store/HospitalStore";
 import { formatDateTime } from "@/shared/lib/date";
 import { formatRrnMasked, maskName, maskPhone } from "@/shared/lib/masking";
 import { STATUS_LABEL } from "@/shared/config/constants";
-import { getManualVisitNextActions } from "@/shared/lib/integrationBridge";
+import type { VisitStatus } from "@/shared/types/domain";
 
 type ReceptionTab = "RESERVATION" | "WAITING" | "EMERGENCY";
 
+type VisitForm = {
+  mode: "WALK_IN" | "RESERVATION";
+  reservationId?: number;
+  patientName: string;
+  gender: "M" | "F";
+  rrnFront: string;
+  rrnBack: string;
+  phone: string;
+  status: VisitStatus;
+};
+
 export function ReceptionScreen() {
-  const { state, capacity, patientsById, addReservation, addVisit, setEmergencyCount, getUnmaskedRrn, updateVisitStatus } = useHospital();
+  const {
+    state,
+    capacity,
+    patientsById,
+    createReservationEntry,
+    updateReservationEntry,
+    registerVisitEntry,
+    updateVisitEntry,
+    removeVisitEntry,
+    setEmergencyCount,
+  } = useHospital() as any;
+
   const [tab, setTab] = useState<ReceptionTab>("RESERVATION");
-  const [selectedPatientId, setSelectedPatientId] = useState<number>(state.patients[0]?.id ?? 0);
-  const [reserveTime, setReserveTime] = useState<string>("2026-03-11T10:30");
-  const [visitPatientId, setVisitPatientId] = useState<number>(state.patients[1]?.id ?? 0);
-  const [visitType, setVisitType] = useState<"WALK_IN" | "RESERVATION">("WALK_IN");
-  const [emergencyValue, setEmergencyValue] = useState<number>(state.emergencyCount);
-  const [unmaskReason, setUnmaskReason] = useState<string>("업무 확인");
-  const [selectedVisitForUnmask, setSelectedVisitForUnmask] = useState<number | null>(null);
-  const [unmaskResult, setUnmaskResult] = useState<string>("");
-  const [toast, setToast] = useState<string>("");
+  const [toast, setToast] = useState("");
+
+  const [reservationForm, setReservationForm] = useState({ name: "", phone: "", reservedAt: "2026-03-11T10:30" });
+  const [editingReservationId, setEditingReservationId] = useState<number | null>(null);
 
   const activeReservations = useMemo(
-    () => state.reservations.filter((r) => r.status === "RESERVED").sort((a, b) => a.reservedAt.localeCompare(b.reservedAt)),
+    () => state.reservations.filter((r: any) => r.status === "RESERVED").sort((a: any, b: any) => a.reservedAt.localeCompare(b.reservedAt)),
     [state.reservations]
   );
 
-  const receptionRows = useMemo(
-    () => state.visits.slice().sort((a, b) => b.id - a.id),
-    [state.visits]
-  );
+  const receptionRows = useMemo(() => state.visits.slice().sort((a: any, b: any) => b.id - a.id), [state.visits]);
+
+  const [visitForm, setVisitForm] = useState<VisitForm>({
+    mode: "WALK_IN",
+    patientName: "",
+    gender: "M",
+    rrnFront: "",
+    rrnBack: "",
+    phone: "",
+    status: "WAITING",
+  });
+  const [editingVisitId, setEditingVisitId] = useState<number | null>(null);
+  const [rrnVisible, setRrnVisible] = useState(false);
+  const [emergencyValue, setEmergencyValue] = useState<number>(state.emergencyCount);
+  const reservationPhoneMidRef = useRef<HTMLInputElement | null>(null);
+  const reservationPhoneLastRef = useRef<HTMLInputElement | null>(null);
+  const visitPhoneMidRef = useRef<HTMLInputElement | null>(null);
+  const visitPhoneLastRef = useRef<HTMLInputElement | null>(null);
+
+  const digitsOnly = (v: string) => v.replace(/\D/g, "");
+  const splitPhone = (phone: string) => {
+    const d = digitsOnly(phone);
+    const body = d.startsWith("010") ? d.slice(3) : d;
+    return { mid: body.slice(0, 4), last: body.slice(4, 8) };
+  };
+  const joinPhone = (mid: string, last: string) => `010-${digitsOnly(mid).slice(0,4)}-${digitsOnly(last).slice(0,4)}`;
 
   const showToast = (message: string) => {
     setToast(message);
     window.setTimeout(() => setToast(""), 2200);
   };
 
+  useEffect(() => {
+    setEmergencyValue(state.emergencyCount);
+  }, [state.emergencyCount]);
+
+  const resetReservationForm = () => {
+    setEditingReservationId(null);
+    setReservationForm({ name: "", phone: "", reservedAt: "2026-03-11T10:30" });
+  };
+
+  const resetVisitForm = () => {
+    setEditingVisitId(null);
+    setRrnVisible(false);
+    setVisitForm({ mode: "WALK_IN", patientName: "", gender: "M", rrnFront: "", rrnBack: "", phone: "", status: "WAITING" });
+  };
+
+  const handleReservationSave = () => {
+    const iso = new Date(reservationForm.reservedAt).toISOString();
+    const result = editingReservationId
+      ? updateReservationEntry(editingReservationId, { ...reservationForm, reservedAt: iso })
+      : createReservationEntry({ ...reservationForm, reservedAt: iso });
+    showToast(result.message);
+    if (result.ok) resetReservationForm();
+  };
+
+  const handleRegisterReservationVisit = (reservationId: number) => {
+    const r = state.reservations.find((it: any) => it.id === reservationId);
+    if (!r) return;
+    const p = patientsById[r.patientId];
+    if (!p) return;
+    const result = registerVisitEntry({
+      mode: "RESERVATION",
+      reservationId,
+      patientName: p.name,
+      gender: p.gender,
+      rrnFront: p.rrnFront,
+      rrnBack: p.rrnBack,
+      phone: p.phone,
+    });
+    showToast(result.message);
+  };
+
+  const handleVisitSave = () => {
+    const result = editingVisitId
+      ? updateVisitEntry(editingVisitId, {
+          patientName: visitForm.patientName,
+          gender: visitForm.gender,
+          rrnFront: visitForm.rrnFront,
+          rrnBack: visitForm.rrnBack,
+          phone: visitForm.phone,
+          status: visitForm.status,
+        })
+      : registerVisitEntry({
+          mode: visitForm.mode,
+          reservationId: visitForm.mode === "RESERVATION" ? visitForm.reservationId : undefined,
+          patientName: visitForm.patientName,
+          gender: visitForm.gender,
+          rrnFront: visitForm.rrnFront,
+          rrnBack: visitForm.rrnBack,
+          phone: visitForm.phone,
+        });
+    showToast(result.message);
+    if (result.ok) resetVisitForm();
+  };
+
+  const selectReservationForEdit = (r: any) => {
+    const p = patientsById[r.patientId];
+    setEditingReservationId(r.id);
+    setReservationForm({ name: p?.name ?? r.contactName ?? "", phone: p?.phone ?? r.contactPhone ?? "", reservedAt: r.reservedAt.slice(0, 16) });
+  };
+
+  const selectVisitForEdit = (visit: any) => {
+    const p = patientsById[visit.patientId];
+    if (!p) return;
+    setEditingVisitId(visit.id);
+    setRrnVisible(false);
+    setVisitForm({
+      mode: visit.visitType,
+      reservationId: visit.sourceReservationId,
+      patientName: p.name,
+      gender: p.gender,
+      rrnFront: p.rrnFront,
+      rrnBack: p.rrnBack,
+      phone: p.phone,
+      status: visit.status,
+    });
+    setTab("WAITING");
+  };
+
+  const reservationPhoneParts = splitPhone(reservationForm.phone);
+  const visitPhoneParts = splitPhone(visitForm.phone);
+
   return (
     <RoleGate allowed={["ADMIN", "SYS"]}>
-      <div className="page-grid">
+      <div className="page-grid page-grid--readable">
         <GlassCard
           title="접수"
           subtitle="원무/시스템관리자 전용 · 예약 / 대기 / 응급"
           right={<StatusBadge label={`총 인원 ${capacity.current}/30`} tone={capacity.level === "SAFE" ? "green" : capacity.level === "WARN" ? "orange" : "red"} />}
         >
           <div className="tab-row">
-            {[
-              { key: "RESERVATION", label: "예약" },
-              { key: "WAITING", label: "대기" },
-              { key: "EMERGENCY", label: "응급" },
-            ].map((t) => (
-              <button
-                key={t.key}
-                className={`tab-btn ${tab === t.key ? "is-active" : ""}`}
-                onClick={() => setTab(t.key as ReceptionTab)}
-                type="button"
-              >
-                {t.label}
-              </button>
+            {[{ key: "RESERVATION", label: "예약" }, { key: "WAITING", label: "대기" }, { key: "EMERGENCY", label: "응급" }].map((t) => (
+              <button key={t.key} className={`tab-btn ${tab === t.key ? "is-active" : ""}`} onClick={() => setTab(t.key as ReceptionTab)} type="button">{t.label}</button>
             ))}
           </div>
 
           {tab === "RESERVATION" && (
             <div className="split-grid">
-              <GlassCard title="예약 등록" className="nested-card">
-                <div className="form-grid">
-                  <label>
-                    <span>예약자</span>
-                    <select value={selectedPatientId} onChange={(e) => setSelectedPatientId(Number(e.target.value))}>
-                      {state.patients.map((p) => (
-                        <option key={p.id} value={p.id}>{p.name} ({maskPhone(p.phone)})</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    <span>예약 일시</span>
-                    <input type="datetime-local" value={reserveTime} onChange={(e) => setReserveTime(e.target.value)} />
-                  </label>
+              <GlassCard title={editingReservationId ? "예약 수정" : "예약 등록"} subtitle="신규 환자 예약 (이름 / 전화번호 / 예약시간대)" className="nested-card">
+                <div className="form-grid tri">
+                  <label><span>이름</span><input value={reservationForm.name} onChange={(e) => setReservationForm((s) => ({ ...s, name: e.target.value }))} /></label>
+                  <label><span>전화번호</span><div className="phone-split"><input value="010" readOnly /><input ref={reservationPhoneMidRef} inputMode="numeric" maxLength={4} value={reservationPhoneParts.mid} onChange={(e) => { const v = e.target.value; setReservationForm((s) => ({ ...s, phone: joinPhone(v, splitPhone(s.phone).last) })); if (digitsOnly(v).length >= 4) reservationPhoneLastRef.current?.focus(); }} placeholder="1234" /><input ref={reservationPhoneLastRef} inputMode="numeric" maxLength={4} value={reservationPhoneParts.last} onChange={(e) => setReservationForm((s) => ({ ...s, phone: joinPhone(splitPhone(s.phone).mid, e.target.value) }))} placeholder="5678" /></div></label>
+                  <label><span>예약시간대</span><input type="datetime-local" value={reservationForm.reservedAt} onChange={(e) => setReservationForm((s) => ({ ...s, reservedAt: e.target.value }))} /></label>
                 </div>
                 <div className="button-row">
-                  <button
-                    type="button"
-                    className="primary-btn"
-                    disabled={!capacity.canRegister}
-                    onClick={() => {
-                      const result = addReservation({ patientId: selectedPatientId, reservedAt: new Date(reserveTime).toISOString(), memo: "초진 예약" });
-                      showToast(result.message);
-                    }}
-                  >
-                    예약 등록
-                  </button>
-                  {!capacity.canRegister && <span className="warning-inline">30명 초과로 등록 차단</span>}
+                  <button type="button" className="primary-btn" onClick={handleReservationSave} disabled={!capacity.canRegister && !editingReservationId}>{editingReservationId ? "예약 수정" : "예약 등록"}</button>
+                  {editingReservationId && <button type="button" onClick={resetReservationForm}>신규 모드</button>}
                 </div>
               </GlassCard>
 
-              <GlassCard title="예약 현황" subtitle="이름/전화번호 마스킹" className="nested-card">
+              <GlassCard title="예약 현황" subtitle="이름/전화번호 마스킹 · 수정/예약내원접수" className="nested-card">
                 <div className="table-wrap">
                   <table className="ui-table compact">
-                    <thead>
-                      <tr>
-                        <th>예약번호</th>
-                        <th>예약시각</th>
-                        <th>예약자</th>
-                        <th>전화번호</th>
-                        <th>상태</th>
-                      </tr>
-                    </thead>
+                    <thead><tr><th>예약번호</th><th>예약시각</th><th>예약자</th><th>전화번호</th><th>상태</th><th>관리</th></tr></thead>
                     <tbody>
-                      {activeReservations.map((r) => {
-                        const patient = patientsById[r.patientId];
+                      {activeReservations.map((r: any) => {
+                        const p = patientsById[r.patientId];
+                        const nm = p?.name ?? r.contactName ?? "-";
+                        const ph = p?.phone ?? r.contactPhone ?? "-";
                         return (
                           <tr key={r.id}>
                             <td>{r.id}</td>
                             <td>{formatDateTime(r.reservedAt)}</td>
-                            <td>{patient ? `${patient.name[0]}**` : "-"}</td>
-                            <td>{patient ? maskPhone(patient.phone) : "-"}</td>
+                            <td>{maskName(nm)}</td>
+                            <td>{maskPhone(ph)}</td>
                             <td>예약</td>
+                            <td>
+                              <div className="inline-btns">
+                                <button type="button" onClick={() => selectReservationForEdit(r)}>수정</button>
+                                <button type="button" onClick={() => handleRegisterReservationVisit(r.id)}>예약내원 접수</button>
+                              </div>
+                            </td>
                           </tr>
                         );
                       })}
@@ -132,53 +232,80 @@ export function ReceptionScreen() {
 
           {tab === "WAITING" && (
             <div className="stack-col">
-              <GlassCard title="접수 등록" subtitle="WALK_IN 또는 예약 내원 처리" className="nested-card">
+              <GlassCard title={editingVisitId ? "접수 수정" : "접수 등록"} subtitle="예약내원 또는 현장 방문 접수 / 접수번호 자동생성" className="nested-card">
                 <div className="form-grid tri">
                   <label>
-                    <span>환자 선택</span>
-                    <select value={visitPatientId} onChange={(e) => setVisitPatientId(Number(e.target.value))}>
-                      {state.patients.map((p) => (
-                        <option key={p.id} value={p.id}>{p.name} / {p.gender === "M" ? "남(M)" : "여(F)"} / {formatRrnMasked(p.rrnFront, p.rrnBack)}</option>
-                      ))}
+                    <span>접수 유형</span>
+                    <select value={visitForm.mode} onChange={(e) => setVisitForm((s) => ({ ...s, mode: e.target.value as any }))} disabled={!!editingVisitId}>
+                      <option value="WALK_IN">현장 접수</option>
+                      <option value="RESERVATION">예약내원 접수</option>
                     </select>
                   </label>
                   <label>
-                    <span>접수 유형</span>
-                    <select value={visitType} onChange={(e) => setVisitType(e.target.value as "WALK_IN" | "RESERVATION")}>
-                      <option value="WALK_IN">워크인 접수</option>
-                      <option value="RESERVATION">예약 내원</option>
+                    <span>성별</span>
+                    <select value={visitForm.gender} onChange={(e) => setVisitForm((s) => ({ ...s, gender: e.target.value as "M" | "F" }))}>
+                      <option value="M">남(M)</option><option value="F">여(F)</option>
                     </select>
                   </label>
-                  <div className="button-cell">
-                    <button
-                      type="button"
-                      className="primary-btn"
-                      disabled={!capacity.canRegister}
-                      onClick={() => showToast(addVisit({ patientId: visitPatientId, visitType }).message)}
-                    >
-                      접수 등록
-                    </button>
+                  <label>
+                    <span>상태 {editingVisitId ? "(수정 가능)" : "(등록 시 대기 고정)"}</span>
+                    <select value={visitForm.status} onChange={(e) => setVisitForm((s) => ({ ...s, status: e.target.value as VisitStatus }))} disabled={!editingVisitId}>
+                      <option value="WAITING">대기</option><option value="IN_TREATMENT">진료중</option><option value="COMPLETED">완료</option>
+                    </select>
+                  </label>
+                </div>
+
+                {visitForm.mode === "RESERVATION" && !editingVisitId && (
+                  <div className="form-grid">
+                    <label>
+                      <span>예약 선택</span>
+                      <select value={visitForm.reservationId ?? ""} onChange={(e) => {
+                        const reservationId = Number(e.target.value);
+                        const r = state.reservations.find((it: any) => it.id === reservationId);
+                        const p = r ? patientsById[r.patientId] : undefined;
+                        setVisitForm((s) => ({
+                          ...s,
+                          reservationId,
+                          patientName: p?.name ?? s.patientName,
+                          gender: p?.gender ?? s.gender,
+                          rrnFront: p?.rrnFront ?? s.rrnFront,
+                          rrnBack: p?.rrnBack ?? s.rrnBack,
+                          phone: p?.phone ?? s.phone,
+                        }));
+                      }}>
+                        <option value="">예약 선택</option>
+                        {activeReservations.map((r: any) => {
+                          const p = patientsById[r.patientId];
+                          return <option key={r.id} value={r.id}>{r.id} / {p?.name ?? r.contactName} / {formatDateTime(r.reservedAt)}</option>;
+                        })}
+                      </select>
+                    </label>
                   </div>
+                )}
+
+                <div className="form-grid tri">
+                  <label><span>환자명</span><input value={visitForm.patientName} onChange={(e) => setVisitForm((s) => ({ ...s, patientName: e.target.value }))} /></label>
+                  <label><span>전화번호</span><div className="phone-split"><input value="010" readOnly /><input ref={visitPhoneMidRef} inputMode="numeric" maxLength={4} value={visitPhoneParts.mid} onChange={(e) => { const v = e.target.value; setVisitForm((s) => ({ ...s, phone: joinPhone(v, splitPhone(s.phone).last) })); if (digitsOnly(v).length >= 4) visitPhoneLastRef.current?.focus(); }} placeholder="1234" /><input ref={visitPhoneLastRef} inputMode="numeric" maxLength={4} value={visitPhoneParts.last} onChange={(e) => setVisitForm((s) => ({ ...s, phone: joinPhone(splitPhone(s.phone).mid, e.target.value) }))} placeholder="5678" /></div></label>
+                  <div className="button-cell"><div className="info-panel"><strong>접수번호</strong> {editingVisitId ? editingVisitId : "자동생성"}</div></div>
+                </div>
+                <div className="form-grid tri">
+                  <label><span>주민번호 앞자리</span><input value={visitForm.rrnFront} onChange={(e) => setVisitForm((s) => ({ ...s, rrnFront: e.target.value.replace(/\D/g, "").slice(0,6) }))} placeholder="YYMMDD" /></label>
+                  <label><span>주민번호 뒷자리</span><input type={rrnVisible ? "text" : "password"} inputMode="numeric" value={visitForm.rrnBack} onChange={(e) => setVisitForm((s) => ({ ...s, rrnBack: e.target.value.replace(/\D/g, "").slice(0,7) }))} maxLength={7} /></label>
+                  <div className="button-cell"><button type="button" onClick={() => setRrnVisible((v) => !v)}>{rrnVisible ? "마스킹" : "전체보기"}</button></div>
+                </div>
+
+                <div className="button-row">
+                  <button type="button" className="primary-btn" onClick={handleVisitSave} disabled={!capacity.canRegister && !editingVisitId}>{editingVisitId ? "접수 수정" : "접수 등록"}</button>
+                  {editingVisitId && <button type="button" onClick={resetVisitForm}>등록 모드</button>}
                 </div>
               </GlassCard>
 
-              <GlassCard title="접수 목록" subtitle="주민번호는 기본 마스킹 · 마스킹 해제는 ADMIN/SYS + 감사로그" className="nested-card">
+              <GlassCard title="접수 목록" subtitle="목록에서는 이름/주민번호 마스킹 표시 · 전체보기 없음" className="nested-card">
                 <div className="table-wrap">
                   <table className="ui-table">
-                    <thead>
-                      <tr>
-                        <th>접수번호</th>
-                        <th>환자명</th>
-                        <th>성별</th>
-                        <th>주민번호</th>
-                        <th>상태</th>
-                        <th>등록시각</th>
-                        <th>상태변경</th>
-                        <th>전체보기</th>
-                      </tr>
-                    </thead>
+                    <thead><tr><th>접수번호</th><th>환자명</th><th>성별</th><th>주민번호</th><th>상태</th><th>등록시각</th><th>접수유형</th><th>관리</th></tr></thead>
                     <tbody>
-                      {receptionRows.map((visit) => {
+                      {receptionRows.map((visit: any) => {
                         const p = patientsById[visit.patientId];
                         if (!p) return null;
                         return (
@@ -189,51 +316,13 @@ export function ReceptionScreen() {
                             <td>{formatRrnMasked(p.rrnFront, p.rrnBack)}</td>
                             <td>{STATUS_LABEL[visit.status]}</td>
                             <td>{formatDateTime(visit.registeredAt)}</td>
-                            <td>
-                              <div className="inline-btns">
-                                {getManualVisitNextActions(visit.status).length === 0 ? (
-                                  <span className="muted">완료됨</span>
-                                ) : (
-                                  getManualVisitNextActions(visit.status).map((nextStatus) => (
-                                    <button
-                                      key={nextStatus}
-                                      type="button"
-                                      onClick={() => showToast(updateVisitStatus(visit.id, nextStatus).message)}
-                                    >
-                                      {STATUS_LABEL[nextStatus]}
-                                    </button>
-                                  ))
-                                )}
-                              </div>
-                            </td>
-                            <td>
-                              <button
-                                type="button"
-                                className="ghost-btn"
-                                onClick={() => {
-                                  setSelectedVisitForUnmask(visit.id);
-                                  const result = getUnmaskedRrn(visit.id, unmaskReason);
-                                  setUnmaskResult(result.ok ? `${visit.id}: ${result.rrn}` : result.message);
-                                }}
-                              >
-                                마스킹 해제
-                              </button>
-                            </td>
+                            <td>{visit.visitType === "RESERVATION" ? "예약내원" : "현장"}</td>
+                            <td><div className="inline-btns"><button type="button" onClick={() => selectVisitForEdit(visit)}>수정</button><button type="button" onClick={() => showToast(removeVisitEntry(visit.id).message)}>삭제</button></div></td>
                           </tr>
                         );
                       })}
                     </tbody>
                   </table>
-                </div>
-
-                <div className="unmask-panel">
-                  <label>
-                    <span>언마스킹 사유</span>
-                    <input value={unmaskReason} onChange={(e) => setUnmaskReason(e.target.value)} placeholder="업무 확인" />
-                  </label>
-                  <div className="muted">
-                    최근 결과: {selectedVisitForUnmask ? `visit ${selectedVisitForUnmask}` : "-"} / {unmaskResult || "-"}
-                  </div>
                 </div>
               </GlassCard>
             </div>
@@ -241,39 +330,19 @@ export function ReceptionScreen() {
 
           {tab === "EMERGENCY" && (
             <div className="split-grid emergency-grid">
-              <GlassCard title="응급 환자 수 (A안)" subtitle="0~10 범위 / 서버에서 총 인원 30 제한 검증 예정" className="nested-card">
+              <GlassCard title="응급 환자 수" subtitle="0~10 범위" className="nested-card">
                 <div className="counter-panel">
                   <div className="counter-big">{state.emergencyCount}명</div>
-                  <input
-                    type="range"
-                    min={0}
-                    max={10}
-                    value={emergencyValue}
-                    onChange={(e) => setEmergencyValue(Number(e.target.value))}
-                  />
+                  <input type="range" min={0} max={10} value={emergencyValue} onChange={(e) => setEmergencyValue(Number(e.target.value))} />
                   <div className="counter-actions">
                     <button type="button" onClick={() => setEmergencyValue((v) => Math.max(0, v - 1))}>-1</button>
                     <button type="button" onClick={() => setEmergencyValue((v) => Math.min(10, v + 1))}>+1</button>
-                    <button type="button" className="primary-btn" onClick={() => showToast(setEmergencyCount(emergencyValue).message)}>
-                      적용
-                    </button>
+                    <button type="button" className="primary-btn" onClick={() => showToast(setEmergencyCount(emergencyValue).message)}>적용</button>
                   </div>
                 </div>
               </GlassCard>
-
               <GlassCard title="운영 상태" className="nested-card">
-                <div className={`capacity-indicator ${capacity.level.toLowerCase()}`}>
-                  <div className="capacity-indicator__ring" />
-                  <div>
-                    <strong>{capacity.current} / 30명</strong>
-                    <p>
-                      대기+진료중 {capacity.waitingAndInTreatment} · 예약 {capacity.reservation} · 응급 {capacity.emergency}
-                    </p>
-                    <p className="muted">
-                      {capacity.canRegister ? "등록 가능" : "등록 차단 상태(30명 도달)"}
-                    </p>
-                  </div>
-                </div>
+                <div className={`capacity-indicator ${capacity.level.toLowerCase()}`}><div className="capacity-indicator__ring" /><div><strong>{capacity.current} / 30명</strong><p>대기+진료중 {capacity.waitingAndInTreatment} · 예약 {capacity.reservation} · 응급 {capacity.emergency}</p></div></div>
               </GlassCard>
             </div>
           )}

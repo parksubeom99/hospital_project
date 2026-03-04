@@ -21,14 +21,14 @@ export function Donut3D(props: Donut3DProps) {
   const c2 = "#6aa2ff";
   const c3 = "#ff7f8f";
   const bg = "#1e293b";
-  const gradient = `conic-gradient(${c1} 0deg ${a.toFixed(2)}deg, ${c2} ${a.toFixed(2)}deg ${(a + b).toFixed(2)}deg, ${c3} ${(a + b).toFixed(2)}deg 360deg)`;
+  const gradient = `conic-gradient(from -90deg, ${c1} 0deg ${a.toFixed(2)}deg, ${c2} ${a.toFixed(2)}deg ${(a+b).toFixed(2)}deg, ${c3} ${(a+b).toFixed(2)}deg 360deg)`;
   const levelColor = ringColorByLevel(level);
   const percent = Math.round((current / max) * 100);
 
   return (
     <div className={`donut3d donut3d--${level.toLowerCase()}`}>
       <div className="donut3d__shadow" />
-      <div className="donut3d__ring" style={{ background: gradient }}>
+      <div className="donut3d__ring" style={{ background: gradient, ["--ring-gradient" as any]: gradient }}>
         <div className="donut3d__inner">
           <div className="donut3d__label">총 운영 인원</div>
           <div className="donut3d__value">{current}<span> / {max}</span></div>

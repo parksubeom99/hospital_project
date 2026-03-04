@@ -19,6 +19,20 @@ export function buildInvoiceItems(finalOrder: FinalOrderDraft | undefined): Invo
     }
   }
 
+
+  if (finalOrder.types.includes("INJECTION")) {
+    const qty = (finalOrder.injections ?? []).length;
+    if (qty > 0) {
+      items.push({
+        itemType: "INJECTION",
+        itemName: "주사비",
+        qty,
+        unitPrice: 5000,
+        amount: qty * 5000,
+      });
+    }
+  }
+
   if (finalOrder.types.includes("SURGERY") && finalOrder.surgery) {
     const unitPrice = finalOrder.surgery.surgeryType === "INTERNAL" ? 50000 : 100000;
     items.push({
