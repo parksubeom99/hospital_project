@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { GlassCard } from "@/shared/components/GlassCard";
 import { RoleGate } from "@/shared/components/RoleGate";
 import { useHospital } from "@/shared/store/HospitalStore";
 import type { StaffProfile } from "@/shared/types/domain";
+import { createMasterStaffServer, deactivateMasterStaffServer, listMasterStaffServer, updateMasterStaffServer } from "@/shared/services/masterStaffApi";
 
 type EmailDomainOption = "naver.com" | "daum.net" | "google.com" | "custom";
 
@@ -68,6 +69,10 @@ function toStaffProfile(form: FormState): StaffProfile {
 
 export function MasterSettingsScreen() {
   const { state, upsertStaff, removeStaff } = useHospital();
+  const [serverMode, setServerMode] = useState(false);
+  const [autoSync, setAutoSync] = useState(false);
+  const [serverBusy, setServerBusy] = useState(false);
+  const [serverLastSyncAt, setServerLastSyncAt] = useState<string>("");
   const [jobFilter, setJobFilter] = useState<"ALL" | "DOCTOR" | "ADMIN">("ALL");
   const [form, setForm] = useState<FormState>(toFormState());
   const [message, setMessage] = useState("");
@@ -84,6 +89,27 @@ export function MasterSettingsScreen() {
     window.setTimeout(() => setMessage(""), 1800);
   };
 
+  const syncFromServer = async () => {
+    setServerBusy(true);
+    try {
+      const list = await listMasterStaffServer();
+      // 서버 목록으로 로컬 스토어를 브리지 반영(없는 항목은 비활성 로컬 데이터로 남을 수 있으므로 upsert 중심)
+      list.forEach((x) => upsertStaff(x));
+      setServerLastSyncAt(new Date().toLocaleTimeString("ko-KR"));
+      emit(`직원 프로필 동기화 완료 (${list.length}건)`);
+    } catch (e) {
+      emit(`동기화 실패: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setServerBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (serverMode && autoSync) {
+      void syncFromServer();
+    }
+  }, [serverMode, autoSync]);
+
   const setJobType = (jobType: "DOCTOR" | "ADMIN") => {
     setForm((f) => ({
       ...f,
@@ -93,21 +119,68 @@ export function MasterSettingsScreen() {
     }));
   };
 
-  const onSubmit = () => {
+  const onSubmit = async () => {
     if (!form.staffName.trim()) return emit("성명을 입력해주세요.");
     if (!form.phoneMid || !form.phoneLast) return emit("연락처를 입력해주세요.");
     if (!form.emailId.trim()) return emit("이메일 아이디를 입력해주세요.");
     if (form.emailDomainOption === "custom" && !form.emailDomainCustom.trim()) return emit("이메일 도메인을 입력해주세요.");
-    emit(upsertStaff(toStaffProfile(form)).message);
-    setForm(toFormState());
+
+    const payload = toStaffProfile(form);
+    if (!serverMode) {
+      emit(upsertStaff(payload).message);
+      setForm(toFormState());
+      return;
+    }
+
+    setServerBusy(true);
+    try {
+      const saved = payload.staffId ? await updateMasterStaffServer(payload) : await createMasterStaffServer(payload);
+      upsertStaff(saved);
+      emit(payload.staffId ? "직원 프로필 수정 저장 완료(서버)" : "직원 프로필 신규 등록 완료(서버)");
+      setForm(toFormState());
+      setServerLastSyncAt(new Date().toLocaleTimeString("ko-KR"));
+    } catch (e) {
+      emit(`저장 실패: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setServerBusy(false);
+    }
   };
 
   const selectForEdit = (staff: StaffProfile) => setForm(toFormState(staff));
+
+  const onDelete = async (staff: StaffProfile) => {
+    if (!serverMode) {
+      emit(removeStaff(staff.staffId).message);
+      return;
+    }
+    setServerBusy(true);
+    try {
+      await deactivateMasterStaffServer(staff.staffId);
+      removeStaff(staff.staffId);
+      emit("직원 프로필 비활성화 완료(서버)");
+      setServerLastSyncAt(new Date().toLocaleTimeString("ko-KR"));
+    } catch (e) {
+      emit(`삭제 실패: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setServerBusy(false);
+    }
+  };
 
   return (
     <RoleGate allowed={["ADMIN", "SYS"]}>
       <div className="page-grid page-grid--readable">
         <GlassCard title="마스터 설정" subtitle="의사/원무 직원 프로필 조회·등록·수정·삭제 (사진/MinIO는 후속)">
+          <div className="button-row" style={{ marginBottom: 12, flexWrap: "wrap" }}>
+            <button type="button" className={serverMode ? "active-btn" : ""} onClick={() => setServerMode((v) => !v)}>
+              {serverMode ? "실서버 CRUD 모드 ON" : "실서버 CRUD 모드 OFF"}
+            </button>
+            <button type="button" className={autoSync ? "active-btn" : ""} onClick={() => setAutoSync((v) => !v)}>
+              자동 동기화 {autoSync ? "ON" : "OFF"}
+            </button>
+            <button type="button" onClick={() => void syncFromServer()} disabled={serverBusy}>직원 동기화</button>
+            {serverBusy && <span className="inline-muted">동기화/저장 중...</span>}
+            {!!serverLastSyncAt && <span className="inline-muted">최근 동기화: {serverLastSyncAt}</span>}
+          </div>
           <div className="split-grid">
             <GlassCard title="프로필 등록/수정" className="nested-card">
               <div className="form-grid tri master-form-grid">
@@ -180,12 +253,12 @@ export function MasterSettingsScreen() {
                 </label>
               </div>
               <div className="button-row">
-                <button type="button" className="primary-btn" onClick={onSubmit}>{form.staffId ? "수정 저장" : "신규 등록"}</button>
+                <button type="button" className="primary-btn" onClick={() => void onSubmit()} disabled={serverBusy}>{form.staffId ? "수정 저장" : "신규 등록"}</button>
                 <button type="button" onClick={() => setForm(toFormState())}>초기화</button>
               </div>
             </GlassCard>
 
-            <GlassCard title="프로필 목록" subtitle="의사 3명 + 원무 직원 예시 포함" className="nested-card">
+            <GlassCard title="프로필 목록" subtitle={serverMode ? "실서버 목록 브리지 (전화/이메일은 서버 필드 부재로 임시값 표시)" : "의사 3명 + 원무 직원 예시 포함"} className="nested-card">
               <div className="button-row">
                 <button type="button" className={jobFilter === "ALL" ? "active-btn" : ""} onClick={() => setJobFilter("ALL")}>전체</button>
                 <button type="button" className={jobFilter === "DOCTOR" ? "active-btn" : ""} onClick={() => setJobFilter("DOCTOR")}>의사</button>
@@ -210,7 +283,7 @@ export function MasterSettingsScreen() {
                         <td>
                           <div className="inline-btns">
                             <button type="button" onClick={() => selectForEdit(s)}>수정</button>
-                            <button type="button" onClick={() => emit(removeStaff(s.staffId).message)}>삭제</button>
+                            <button type="button" onClick={() => void onDelete(s)} disabled={serverBusy}>삭제</button>
                           </div>
                         </td>
                       </tr>
