@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
 import { GlassCard } from "@/shared/components/GlassCard";
 import { Donut3D } from "@/shared/components/Donut3D";
 import { StatusBadge } from "@/shared/components/StatusBadge";
@@ -7,11 +8,18 @@ import { useHospital } from "@/shared/store/HospitalStore";
 import { maskName, maskReservationName, maskPhone, formatRrnMasked } from "@/shared/lib/masking";
 import { formatDateTime } from "@/shared/lib/date";
 import { STATUS_LABEL } from "@/shared/config/constants";
+import { fetchDashboardSummaryServer, type DashboardSummaryServer } from "@/shared/services/dashboardApi";
 
 export function DashboardScreen() {
   const { state, capacity, patientsById } = useHospital();
 
-  const receptionRows = state.visits
+  const [useServerSummary, setUseServerSummary] = useState(false);
+  const [autoSyncServer, setAutoSyncServer] = useState(false);
+  const [serverSummary, setServerSummary] = useState<DashboardSummaryServer | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string>("");
+
+  const localReceptionRows = state.visits
     .slice()
     .sort((a, b) => b.id - a.id)
     .slice(0, 10)
@@ -27,7 +35,7 @@ export function DashboardScreen() {
       };
     });
 
-  const reservationRows = state.reservations
+  const localReservationRows = state.reservations
     .filter((r) => r.status === "RESERVED")
     .slice()
     .sort((a, b) => a.reservedAt.localeCompare(b.reservedAt))
@@ -42,36 +50,108 @@ export function DashboardScreen() {
       };
     });
 
-  const levelTone = capacity.level === "SAFE" ? "green" : capacity.level === "WARN" ? "orange" : "red";
+  const syncServerSummary = async () => {
+    try {
+      setSyncing(true);
+      setSyncError("");
+      const payload = await fetchDashboardSummaryServer({ session: state.session ?? undefined });
+      setServerSummary(payload);
+    } catch (e: any) {
+      setSyncError(e?.message || "대시보드 집계 동기화 실패");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!autoSyncServer) return;
+    void syncServerSummary();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSyncServer]);
+
+  const serverBackedCapacity = useMemo(() => {
+    if (!serverSummary) return null;
+    const waitingAndInTreatment = Math.max(0, Number(serverSummary.counts.waiting || 0));
+    const reservation = Math.max(0, Number(serverSummary.counts.reservation || 0));
+    const emergency = Math.max(0, Number(serverSummary.counts.emergency || 0));
+    const current = waitingAndInTreatment + reservation + emergency;
+    const max = capacity.max;
+    const level = current >= max ? "FULL" : current >= 25 ? "DANGER" : current >= 20 ? "WARN" : "SAFE";
+    return {
+      ...capacity,
+      waitingAndInTreatment,
+      reservation,
+      emergency,
+      current,
+      max,
+      level,
+      canRegister: current < max,
+    };
+  }, [serverSummary, capacity]);
+
+  const viewCapacity = useServerSummary && serverBackedCapacity ? serverBackedCapacity : capacity;
+
+  const receptionRows = useMemo(() => {
+    if (!(useServerSummary && serverSummary)) return localReceptionRows;
+    return serverSummary.patients.slice(0, 10).map((p) => ({
+      visitId: p.visitId,
+      patientNameMasked: p.patientName ? maskName(p.patientName) : "-",
+      genderLabel: "-",
+      rrnMasked: "******-*******",
+      status: STATUS_LABEL[String(p.status || "").toUpperCase()] || String(p.status || "-") || "-",
+      registeredAt: p.createdAt || "",
+    }));
+  }, [useServerSummary, serverSummary, localReceptionRows]);
+
+  // 현재 백엔드 summary에는 예약 테이블 상세 목록이 없으므로 로컬 예약 목록 유지 (카운트만 summary 사용 가능)
+  const reservationRows = localReservationRows;
+
+  const levelTone = viewCapacity.level === "SAFE" ? "green" : viewCapacity.level === "WARN" ? "orange" : "red";
 
   return (
     <div className="page-grid">
       <GlassCard
         title="대시보드"
         subtitle="환자 접수 현황 / 예약 현황은 조회 전용"
-        right={<StatusBadge label={`${capacity.level} · ${capacity.canRegister ? "등록 가능" : "등록 차단"}`} tone={levelTone as any} />}
+        right={<StatusBadge label={`${viewCapacity.level} · ${viewCapacity.canRegister ? "등록 가능" : "등록 차단"}`} tone={levelTone as any} />}
       >
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+          <button className="btn ghost" type="button" onClick={() => setUseServerSummary((v) => !v)}>
+            {useServerSummary ? "실서버 집계 사용 중" : "로컬 집계 사용 중"}
+          </button>
+          <button className="btn ghost" type="button" onClick={syncServerSummary} disabled={syncing}>
+            {syncing ? "동기화 중..." : "집계 동기화"}
+          </button>
+          <button className="btn ghost" type="button" onClick={() => setAutoSyncServer((v) => !v)}>
+            {autoSyncServer ? "자동 동기화 ON" : "자동 동기화 OFF"}
+          </button>
+          {serverSummary?.generatedAt && (
+            <span className="helper-text">서버 집계시각: {formatDateTime(serverSummary.generatedAt)}</span>
+          )}
+          {syncError && <span className="helper-text" style={{ color: "#ff9aa5" }}>{syncError}</span>}
+        </div>
+
         <div className="dashboard-grid">
           <div>
             <Donut3D
-              waitingAndInTreatment={capacity.waitingAndInTreatment}
-              reservation={capacity.reservation}
-              emergency={capacity.emergency}
-              current={capacity.current}
-              max={capacity.max}
-              level={capacity.level}
+              waitingAndInTreatment={viewCapacity.waitingAndInTreatment}
+              reservation={viewCapacity.reservation}
+              emergency={viewCapacity.emergency}
+              current={viewCapacity.current}
+              max={viewCapacity.max}
+              level={viewCapacity.level}
             />
-            <div className={`capacity-banner ${capacity.level.toLowerCase()}`}>
+            <div className={`capacity-banner ${String(viewCapacity.level).toLowerCase()}`}>
               <div>
                 <strong>운영 제한 규칙</strong>
                 <p>총 인원 = 대기 + 진료중 + 예약 + 응급 (최대 30명)</p>
               </div>
-              <div className="capacity-banner__count">{capacity.current} / 30</div>
+              <div className="capacity-banner__count">{viewCapacity.current} / 30</div>
             </div>
           </div>
 
           <div className="stack-col">
-            <GlassCard title="환자 접수 현황" subtitle="대시보드에서는 등록/수정 불가" className="nested-card">
+            <GlassCard title="환자 접수 현황" subtitle={useServerSummary ? "실서버 summary 기반 (민감정보 마스킹 고정)" : "대시보드에서는 등록/수정 불가"} className="nested-card">
               <div className="table-wrap">
                 <table className="ui-table compact">
                   <thead>
@@ -92,7 +172,7 @@ export function DashboardScreen() {
                         <td>{r.genderLabel}</td>
                         <td>{r.rrnMasked}</td>
                         <td>{r.status}</td>
-                        <td>{formatDateTime(r.registeredAt)}</td>
+                        <td>{r.registeredAt ? formatDateTime(r.registeredAt) : "-"}</td>
                       </tr>
                     ))}
                     {receptionRows.length === 0 && (
@@ -103,7 +183,7 @@ export function DashboardScreen() {
               </div>
             </GlassCard>
 
-            <GlassCard title="예약 현황" subtitle="예약자명/전화번호 마스킹 표시" className="nested-card">
+            <GlassCard title="예약 현황" subtitle={useServerSummary ? "목록은 로컬 표시, 카운트는 서버 집계 반영 가능" : "예약자명/전화번호 마스킹 표시"} className="nested-card">
               <div className="table-wrap">
                 <table className="ui-table compact">
                   <thead>
